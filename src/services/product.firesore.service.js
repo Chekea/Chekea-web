@@ -301,6 +301,7 @@ export async function searchProductsFS({
   const constraints = [];
 
   if (category && category !== "ALL") constraints.push(where("Categoria", "==", category));
+  
   if (subcategory && subcategory !== "ALL") constraints.push(where("Subcategoria", "==", subcategory));
 
   if (typeof minPrice === "number") constraints.push(where("Precio", ">=", minPrice));
@@ -309,7 +310,9 @@ export async function searchProductsFS({
   if (tokens.length > 0) constraints.push(where("Ttoken", "array-contains-any", tokens));
 
   const { field, dir } = buildSort(sort);
-    constraints.push(orderBy('visible', true));
+    constraints.push(where("visible", "==", true));
+
+    console.log(field,dir)
 
   constraints.push(orderBy(field, dir));
 
