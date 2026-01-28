@@ -59,6 +59,8 @@ function formatMsToHMS(ms) {
   return `${pad2(h)}:${pad2(m)}:${pad2(s)}`;
 }
 
+console.log("MODE:", import.meta.env.MODE);
+console.log("ALL ENV:", import.meta.env,'HOLA');
 function CountdownChip({ label = "Termina en", msLeft = 0 }) {
   return (
     <Chip

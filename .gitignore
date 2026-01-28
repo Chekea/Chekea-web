@@ -1,5 +1,4 @@
 # Firebase config (sensible)
-src/config/firebase.js
 # Logs
 logs
 *.log
@@ -13,6 +12,8 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+.env.*
 
 # Editor directories and files
 .vscode/*
