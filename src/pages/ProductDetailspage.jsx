@@ -27,6 +27,7 @@ import LocalShippingIcon from "@mui/icons-material/LocalShipping";
 import VerifiedUserIcon from "@mui/icons-material/VerifiedUser";
 import ReplayIcon from "@mui/icons-material/Replay";
 import FlightTakeoffIcon from "@mui/icons-material/FlightTakeoff";
+import LocalOfferIcon from "@mui/icons-material/LocalOffer";
 
 import { useTranslation } from "react-i18next";
 
@@ -57,9 +58,8 @@ const LS_SHIP_METHOD = "chekea_ship_method_v1";
 const SS_VIEW_PREFIX = "chekea_viewed_once_v1:";
 
 /* -------------------- SIMPLE CACHE (Memory + sessionStorage) -------------------- */
-// ✅ Esto evita re-descargas al navegar atrás (Back) y volver a entrar al producto.
 const CACHE_PREFIX = "chekea_cache_v1:";
-const CACHE_TTL_MS = 2 * 60 * 1000; // 2 min (ajusta)
+const CACHE_TTL_MS = 2 * 60 * 1000; // 2 min
 const MEM_CACHE = new Map(); // key -> { value, expiresAt }
 
 function now() {
@@ -69,11 +69,9 @@ function isFresh(entry) {
   return entry && entry.expiresAt > now();
 }
 function cacheGet(key) {
-  // 1) memoria
   const m = MEM_CACHE.get(key);
   if (isFresh(m)) return { value: m.value, from: "memory" };
 
-  // 2) sessionStorage
   try {
     const raw = sessionStorage.getItem(key);
     if (!raw) return null;
@@ -224,9 +222,8 @@ function estimateShippingFromProduct(city, { method, pesoTipo, dimensionTipo, qt
   };
 }
 
-/* -------------------- YouTube (solo pasar ID product?.vid) -------------------- */
+/* -------------------- YouTube -------------------- */
 function YouTubeEmbed({ videoId, title = "Chekea Videos" }) {
-  // ✅ FIX: si NO hay videoId -> no render
   if (!videoId) return null;
 
   return (
@@ -245,7 +242,9 @@ function YouTubeEmbed({ videoId, title = "Chekea Videos" }) {
       >
         <Box
           component="iframe"
-          src={`https://www.youtube.com/embed/${encodeURIComponent(videoId)}?rel=0&modestbranding=1`}
+          src={`https://www.youtube.com/embed/${encodeURIComponent(
+            videoId
+          )}?rel=0&modestbranding=1`}
           title={title}
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
           allowFullScreen
@@ -270,6 +269,100 @@ function CenterLoader({ text = "Cargando…" }) {
         <CircularProgress />
         <Typography sx={{ fontWeight: 900 }}>{text}</Typography>
       </Stack>
+    </Box>
+  );
+}
+
+/* -------------------- Promo SMS (siempre visible) -------------------- */
+function StickyPromoSMS({
+  message = "🎉 10% de descuento en tu primera compra",
+  sub = "Usa el código: PRIMERA10",
+  onCopy,
+}) {
+  return (
+    <Box
+      sx={{
+        position: "fixed",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: (t) => t.zIndex.drawer + 1000,
+        px: 1,
+        pb: "calc(env(safe-area-inset-bottom, 0px) + 10px)",
+        pt: 1,
+        pointerEvents: "none",
+      }}
+    >
+      <Paper
+        elevation={10}
+        sx={{
+          mx: "auto",
+          maxWidth: 980,
+          borderRadius: 999,
+          px: { xs: 1.25, sm: 2 },
+          py: 1,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 1,
+          pointerEvents: "auto",
+          backdropFilter: "blur(8px)",
+        }}
+      >
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
+          <Box
+            sx={{
+              width: 36,
+              height: 36,
+              borderRadius: 999,
+              display: "grid",
+              placeItems: "center",
+              bgcolor: "primary.main",
+              color: "primary.contrastText",
+              flex: "0 0 auto",
+            }}
+          >
+            <LocalOfferIcon fontSize="small" />
+          </Box>
+
+          <Box sx={{ minWidth: 0 }}>
+            <Typography
+              sx={{
+                fontWeight: 900,
+                lineHeight: 1.1,
+                fontSize: { xs: 13, sm: 14 },
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+              title={message}
+            >
+              {message}
+            </Typography>
+            <Typography
+              sx={{
+                color: "text.secondary",
+                fontSize: { xs: 12, sm: 13 },
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+              title={sub}
+            >
+              {sub}
+            </Typography>
+          </Box>
+        </Stack>
+
+        <Button
+          size="small"
+          variant="contained"
+          onClick={onCopy}
+          sx={{ borderRadius: 999, fontWeight: 900, px: 1.5, flex: "0 0 auto" }}
+        >
+          Copiar código
+        </Button>
+      </Paper>
     </Box>
   );
 }
@@ -305,8 +398,10 @@ export default function ProductDetailsPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  // ✅ Loader cuando se guarda en carrito
   const [cartSaving, setCartSaving] = useState(false);
+
+  // ✅ NUEVO: leer más / leer menos (detalles)
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
 
   useEffect(() => saveShipCity(shipCity), [shipCity]);
   useEffect(() => saveShipMethod(shipMethod), [shipMethod]);
@@ -329,6 +424,7 @@ export default function ProductDetailsPage() {
       setSelectedColor(null);
       setSelectedStyle(null);
       setActiveImage(null);
+      setDetailsExpanded(false); // ✅ reset al cambiar de producto
     };
 
     const hydrate = ({ p, c, s, imgs, rel }, isCached) => {
@@ -347,6 +443,8 @@ export default function ProductDetailsPage() {
 
       const primary = pickImgUrl(imgs?.[0]) ?? p?.Imagen ?? p?.image ?? null;
       setActiveImage(primary);
+
+      setDetailsExpanded(false); // ✅ siempre inicia colapsado
     };
 
     (async () => {
@@ -355,12 +453,9 @@ export default function ProductDetailsPage() {
       const cacheKey = `${CACHE_PREFIX}product_bundle:${id}`;
       const cached = cacheGet(cacheKey);
 
-      // ✅ 1) Si hay cache: pinta instantáneo y NO limpies pantalla
       if (cached?.value) {
         hydrate(cached.value, true);
 
-        // ✅ SWR: revalidación en background (sin parpadeo)
-        // Si no quieres revalidación, comenta este bloque.
         try {
           const p2 = await getProductByIdFS(id);
           if (!alive || !p2) return;
@@ -385,14 +480,11 @@ export default function ProductDetailsPage() {
           const bundle2 = { p: p2, c: c2, s: s2, imgs: imgs2, rel: rel2 };
           cacheSet(cacheKey, bundle2);
           hydrate(bundle2, true);
-        } catch {
-          // si falla la revalidación, te quedas con cache
-        }
+        } catch {}
 
         return;
       }
 
-      // ✅ 2) Sin cache: carga normal (aquí sí puedes limpiar UI)
       setLoading(true);
       setFromCache(false);
       resetUI();
@@ -571,7 +663,6 @@ export default function ProductDetailsPage() {
       imgreal,
       imagenesreales: imgreal ? imagenesreales : [],
 
-      // ✅ YouTube: ID viene de product?.vid
       youtubeId: product?.vid ?? null,
     };
   }, [product, i18n.language, shipCity, shipMethod, qty, productKey, selectedStyle]);
@@ -785,9 +876,33 @@ export default function ProductDetailsPage() {
 
   const disableColorRequired = colors.length > 0 && !selectedColor;
 
+  // ✅ Acción del SMS: copia código
+  const onCopyPromo = useCallback(async () => {
+    const code = "PRIMERA10";
+    try {
+      await navigator.clipboard.writeText(code);
+      alert("Código copiado: PRIMERA10");
+    } catch {
+      alert("Copia manual: PRIMERA10");
+    }
+  }, []);
+
+  // ✅ Detecta si hay “más” para mostrar el botón
+  const hasMoreDetails = useMemo(() => {
+    const txt = String(mapped?._details ?? "").trim();
+    return txt.length > 160; // heurística simple; evita botón si es muy corto
+  }, [mapped?._details]);
+
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
       <Header queryText="" onQueryChange={() => {}} />
+
+      {/* ✅ SMS promo siempre visible */}
+      <StickyPromoSMS
+        message="🎉 10% de descuento en tu primera compra"
+        sub="Usa el código: PRIMERA10"
+        onCopy={onCopyPromo}
+      />
 
       {/* Loader global mientras se guarda en carrito */}
       <Backdrop open={cartSaving} sx={{ color: "#fff", zIndex: (t) => t.zIndex.drawer + 999 }}>
@@ -797,7 +912,15 @@ export default function ProductDetailsPage() {
         </Stack>
       </Backdrop>
 
-      <Container maxWidth="lg" sx={{ px: { xs: 1, sm: 2 }, py: 3 }}>
+      {/* ✅ padding bottom para que el banner fijo no tape contenido */}
+      <Container
+        maxWidth="lg"
+        sx={{
+          px: { xs: 1, sm: 2 },
+          py: 3,
+          pb: { xs: 12, sm: 11 },
+        }}
+      >
         {loading ? (
           <CenterLoader text="Cargando producto…" />
         ) : err ? (
@@ -860,7 +983,6 @@ export default function ProductDetailsPage() {
                     </Stack>
                   )}
 
-                  {/* Cajita SOLO si Imgreal === true */}
                   {mapped.imgreal && (mapped.imagenesreales?.length ?? 0) > 0 && (
                     <Paper variant="outlined" sx={{ mt: 2, p: 1.5, borderRadius: 2 }}>
                       <Typography sx={{ fontWeight: 900, mb: 1 }}>Imágenes reales</Typography>
@@ -913,9 +1035,35 @@ export default function ProductDetailsPage() {
                     <Chip size="small" label="Envío África" variant="outlined" />
                   </Stack>
 
-                  <Typography sx={{ color: "text.secondary", mt: 1 }}>
-                    {mapped._details}
-                  </Typography>
+                  {/* ✅ Detalles: solo 4 líneas + Leer más */}
+                  <Box sx={{ mt: 1 }}>
+                    <Typography
+                      sx={{
+                        color: "text.secondary",
+                        display: "-webkit-box",
+                        WebkitBoxOrient: "vertical",
+                        overflow: "hidden",
+                        ...(detailsExpanded
+                          ? {}
+                          : {
+                              WebkitLineClamp: 4,
+                            }),
+                      }}
+                    >
+                      {mapped._details}
+                    </Typography>
+
+                    {hasMoreDetails && (
+                      <Button
+                        variant="text"
+                        size="small"
+                        onClick={() => setDetailsExpanded((v) => !v)}
+                        sx={{ mt: 0.5, px: 0, fontWeight: 900, textTransform: "none" }}
+                      >
+                        {detailsExpanded ? "Leer menos" : "Leer más"}
+                      </Button>
+                    )}
+                  </Box>
 
                   <Divider sx={{ my: 2 }} />
 

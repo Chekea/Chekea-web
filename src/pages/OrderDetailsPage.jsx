@@ -224,7 +224,7 @@ export default function OrderDetailsPage() {
                           {order?.title ?? "Producto"}
                         </Typography>
                         <Typography variant="body2" sx={{ color: "text.secondary" }}>
-                          Precio: ${order?.Precio ?? "—"} • Cantidad: {order?.qty ?? 1}
+                          Precio: XFA{order?.Precio ?? "—"} • Cantidad: {order?.qty ?? 1}
                         </Typography>
                         <Typography variant="body2" sx={{ color: "text.secondary" }}>
                           Detalles: {order.Detalles}
