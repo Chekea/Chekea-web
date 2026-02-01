@@ -39,6 +39,73 @@ function CenterLoader({ text = "Cargando productos…" }) {
   );
 }
 
+/* ==================== CACHE (ya añadido) ====================
+   - Cache en memoria para volver atrás sin re-descargar
+   - TTL + LRU
+   - Guarda items/hasNext y lastDocsRef (cursores)
+============================================================== */
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 min
+const CACHE_MAX_ENTRIES = 60;
+
+const pageCache = new Map(); // key -> { ts, items, hasNext, lastDocByPage }
+
+function makePageKey(category, subcat, sort, page) {
+  return `${category}__${subcat}__${sort}__p${page}`;
+}
+
+function cacheGet(key) {
+  const hit = pageCache.get(key);
+  if (!hit) return null;
+
+  if (Date.now() - hit.ts > CACHE_TTL_MS) {
+    pageCache.delete(key);
+    return null;
+  }
+
+  // LRU touch
+  pageCache.delete(key);
+  pageCache.set(key, hit);
+  return hit;
+}
+
+function cacheSet(key, value) {
+  pageCache.set(key, value);
+
+  // LRU trim
+  while (pageCache.size > CACHE_MAX_ENTRIES) {
+    const oldestKey = pageCache.keys().next().value;
+    pageCache.delete(oldestKey);
+  }
+}
+
+/* ==================== PERSISTENCIA PAGINACIÓN (NUEVO) ====================
+   Guarda/recupera el último "p" (y filtros) para volver atrás al mismo estado
+   incluso si la URL del detalle no conserva ?p=...
+============================================================================ */
+const LAST_STATE_STORAGE_KEY = "categoryPage:lastState";
+
+function makeCtxKey(category, subcat, sort) {
+  return `${category}__${subcat}__${sort}`;
+}
+
+function readLastState() {
+  try {
+    const raw = sessionStorage.getItem(LAST_STATE_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLastState(state) {
+  try {
+    sessionStorage.setItem(LAST_STATE_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // ignore
+  }
+}
+/* ==================== /PERSISTENCIA PAGINACIÓN ==================== */
+
 export default function CategoryPage() {
   const { t, i18n } = useTranslation();
   const nav = useNavigate();
@@ -84,6 +151,46 @@ export default function CategoryPage() {
     return SUBCATS_BY_CAT[category] ?? [];
   }, [category]);
 
+  /* -------------------- RESTAURAR PAGINACIÓN AL VOLVER ATRÁS (NUEVO) --------------------
+     Si falta "p" en la URL (o es inválido), recupera el último estado guardado.
+     Esto es lo que hace que al volver del detalle regrese al mismo número de página.
+  -------------------------------------------------------------------------------------- */
+  useEffect(() => {
+    const hasP = searchParams.has("p");
+    const pVal = Number(searchParams.get("p") ?? 0);
+
+    // solo restaurar si NO viene p válido
+    if (hasP && Number.isFinite(pVal) && pVal >= 1) return;
+
+    const last = readLastState();
+    if (!last) return;
+
+    // restaura solo si coincide el "contexto" (cat/subcat/sort)
+    const ctx = makeCtxKey(category, subcat, sort);
+    if (last?.ctxKey !== ctx) return;
+
+    // aplica p guardado (y respeta tu reemplazo)
+    if (last?.p && Number.isFinite(last.p) && last.p >= 1) {
+      updateParams({ p: last.p });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category, subcat, sort]);
+
+  /* -------------------- GUARDAR ESTADO DE PAGINACIÓN (NUEVO) -------------------- */
+  useEffect(() => {
+    if (!category || category === "ALL") return;
+    if (!Number.isFinite(page) || page < 1) return;
+
+    writeLastState({
+      ctxKey: makeCtxKey(category, subcat, sort),
+      cat: category,
+      subcat,
+      sort,
+      p: page,
+      ts: Date.now(),
+    });
+  }, [category, subcat, sort, page]);
+
   /* -------------------- RESET cursores cuando cambia contexto -------------------- */
   useEffect(() => {
     lastDocsRef.current = { 1: null };
@@ -91,14 +198,31 @@ export default function CategoryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category, subcat, sort]);
 
-  /* -------------------- CARGA REAL CON CURSOR -------------------- */
+  /* -------------------- CARGA REAL CON CURSOR + CACHING -------------------- */
   useEffect(() => {
     let alive = true;
 
     async function load() {
-      setLoading(true);      // 🔥 loader ON
+      const cacheKey = makePageKey(category, subcat, sort, page);
+
+      // ✅ Si hay cache => pinta al instante y NO re-descarga
+      const cached = cacheGet(cacheKey);
+      if (cached) {
+        setError("");
+        setItems(cached.items ?? []);
+        setHasNext(Boolean(cached.hasNext));
+        setLoading(false);
+
+        if (cached.lastDocByPage) {
+          lastDocsRef.current = cached.lastDocByPage;
+        }
+        return;
+      }
+
+      // Sin cache => comportamiento original
+      setLoading(true);
       setError("");
-      setItems([]);          // 🔥 pantalla limpia
+      setItems([]);
 
       try {
         const lastDoc = lastDocsRef.current[page] ?? null;
@@ -109,7 +233,7 @@ export default function CategoryPage() {
           subcategory: subcat,
           sort,
           queryText: "",
-          lastDoc, // 🔑 CLAVE para Firestore
+          lastDoc,
         });
 
         if (!alive) return;
@@ -117,14 +241,22 @@ export default function CategoryPage() {
         setItems(res?.items ?? []);
         setHasNext(Boolean(res?.hasNext));
 
-        // 🔑 guarda cursor para la siguiente página
+        // guarda cursor para la siguiente página
         lastDocsRef.current[page + 1] = res?.lastDoc ?? null;
+
+        // guardar en cache
+        cacheSet(cacheKey, {
+          ts: Date.now(),
+          items: res?.items ?? [],
+          hasNext: Boolean(res?.hasNext),
+          lastDocByPage: { ...lastDocsRef.current },
+        });
       } catch (e) {
         console.error(e);
         if (alive) setError(t("loadError"));
       } finally {
         if (alive) {
-          setLoading(false); // 🔥 loader OFF
+          setLoading(false);
           window.scrollTo({ top: 0, behavior: "auto" });
         }
       }
