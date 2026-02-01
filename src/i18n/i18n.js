@@ -3,7 +3,7 @@ import { initReactI18next } from "react-i18next";
 
 const resources = {
   es: { translation: {
-    brandLine: "Compra fácil, precios de China, envíos a toda África",
+    brandLine: "Compra fácil a precios de China ",
     searchPlaceholder: "¿Qué estás buscando?",
     category: "Categoría",
     sort: "Ordenar",
@@ -16,7 +16,7 @@ const resources = {
     addToCart: "Añadir al carrito",
     loadError: "No se pudieron cargar los productos. Intenta de nuevo.",
     empty: "No encontramos productos con esos filtros.",
-    deals: "Ofertas del día",
+    deals: "Todo lo nuevo",
     prev: "Anterior",
     next: "Siguiente",
     tracking: "Seguimiento",
@@ -25,7 +25,7 @@ const resources = {
     page: "Página",
   }},
   en: { translation: {
-    brandLine: "Shop easy, China prices, shipping across Africa",
+    brandLine: "Shop easy, China prices",
     searchPlaceholder: "What are you looking for?",
     category: "Category",
     sort: "Sort",
@@ -47,7 +47,7 @@ const resources = {
     page: "Page",
   }},
   fr: { translation: {
-    brandLine: "Achetez facilement, prix de Chine, livraison en Afrique",
+    brandLine: "Achetez facilement, prix de Chine ",
     searchPlaceholder: "Que cherchez-vous ?",
     category: "Catégorie",
     sort: "Trier",

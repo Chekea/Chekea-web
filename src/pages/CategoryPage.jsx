@@ -47,7 +47,7 @@ export default function CategoryPage() {
   /* -------------------- URL params -------------------- */
   const category = searchParams.get("cat") ?? "ALL";
   const subcat = searchParams.get("subcat") ?? "ALL";
-  const sort = searchParams.get("sort") ?? "relevance";
+  const sort = searchParams.get("sort") ?? "newest";
   const page = Number(searchParams.get("p") ?? 1);
 
   /* -------------------- state -------------------- */

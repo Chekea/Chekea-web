@@ -3,9 +3,11 @@ import { Grid, Skeleton, Box } from "@mui/material";
 import ProductCard from "./productcart";
 
 /* ===== CONFIGURACIÓN ===== */
-const CARD_WIDTH = 190;   // usa 190 si lo quieres más pequeño
 const CARD_HEIGHT = 420;
 const IMAGE_HEIGHT = 190;
+
+// Ancho responsive para que quepan 2 en móvil
+const CARD_WIDTH = { xs: 160, sm: 180, md: 190 };
 /* ========================= */
 
 function SkeletonCard() {
@@ -19,11 +21,7 @@ function SkeletonCard() {
         flexDirection: "column",
       }}
     >
-      <Skeleton
-        variant="rectangular"
-        height={IMAGE_HEIGHT}
-        sx={{ borderRadius: 3 }}
-      />
+      <Skeleton variant="rectangular" height={IMAGE_HEIGHT} sx={{ borderRadius: 3 }} />
 
       <Skeleton height={28} sx={{ mt: 1 }} />
       <Skeleton height={18} width="70%" />
@@ -42,33 +40,39 @@ function SkeletonCard() {
 }
 
 export default function ProductGrid({ items = [], loading }) {
-  // 2 columnas móvil, 4 desktop
+  // 2 columnas en móvil, 3 en md, 4 en lg
   const columns = { xs: 6, sm: 6, md: 4, lg: 3 };
 
   return (
-    <Grid container spacing={2}>
+    <Grid
+      container
+      spacing={{ xs: 1, sm: 2 }}        // menos espacio en móvil para que entren 2
+      sx={{
+        px: { xs: 1, sm: 0 },          // padding lateral suave en móvil
+      }}
+    >
       {loading
         ? Array.from({ length: 12 }).map((_, i) => (
             <Grid
               item
-              key={i}
+              key={`sk-${i}`}
               {...columns}
               sx={{
                 display: "flex",
-                justifyContent: "center",
+                justifyContent: { xs: "flex-start", sm: "center" }, // en móvil no centra
               }}
             >
               <SkeletonCard />
             </Grid>
           ))
-        : items.map((p) => (
+        : items.map((p, idx) => (
             <Grid
               item
-    key={p?.id ?? p?._id ?? p?.Codigo ?? `${p?.Titulo}-${p?.Precio}-${idx}`}
-            {...columns}
+              key={p?.id ?? p?._id ?? p?.Codigo ?? `${p?.Titulo}-${p?.Precio}-${idx}`}
+              {...columns}
               sx={{
                 display: "flex",
-                justifyContent: "center",
+                justifyContent: { xs: "flex-start", sm: "center" },
               }}
             >
               {/* Wrapper que fija el ancho visual */}
@@ -79,7 +83,7 @@ export default function ProductGrid({ items = [], loading }) {
                   height: CARD_HEIGHT,
                 }}
               >
-                <ProductCard product={p}  />
+                <ProductCard product={p} />
               </Box>
             </Grid>
           ))}

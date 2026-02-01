@@ -9,11 +9,20 @@ import imgConjuntos from "../assets/homeCats/conjuntos.png";
 import imgAbajo from "../assets/homeCats/partes-abajo.png";
 import imgBolsos from "../assets/homeCats/bolsos.png";
 import imgHombre from "../assets/homeCats/hombre.png";
+import imglenceria from "../assets/homeCats/lenceria.png";
+import recien from "../assets/homeCats/recien.png";
+import infantil from "../assets/homeCats/infantil.png";
+
+import belleza from "../assets/homeCats/belleza.png";
+import tacones from "../assets/homeCats/tacones.png";
+import mas from "../assets/homeCats/uxas.png";
+
+
 import pelo from "../assets/homeCats/PELOS.png";
 
 import imgKids from "../assets/homeCats/ninos-bebes.png";
 import imgJerseys from "../assets/homeCats/jerseis-cardigans.png";
-import joyas from "../assets/homeCats/ffff.jpg";
+import joyas from "../assets/homeCats/joyas.png";
 import imgSudaderas from "../assets/homeCats/sudaderas.png";
 import imgAbrigos from "../assets/homeCats/abrigos-chaquetas.png";
 
@@ -26,19 +35,23 @@ const CategoryIconsBar = memo(function CategoryIconsBar({
     () => [
       { label: "Vestidos", cat: "Moda & Accesorios", subcat: "Vestidos", img: imgVestidos },
       { label: "Tops", cat: "Moda & Accesorios", subcat: "Camisas", img: imgTops },
-      { label: "Tallas Grandes", cat: "Moda & Accesorios", subcat: "Tallas Grandes", img: imgPlus },
       { label: "Conjuntos", cat: "Moda & Accesorios", subcat: "Trajes", img: imgConjuntos },
       { label: "Partes de abajo", cat: "Moda & Accesorios", subcat: "Pantalones", img: imgAbajo },
       { label: "Bolsos y Equipaje", cat: "Moda & Accesorios", subcat: "Bolsos", img: imgBolsos },
-      { label: "Hombre", cat: "Moda & Accesorios", subcat: "Otros", img: imgHombre },
+      // { label: "Hombre", cat: "Moda & Accesorios", subcat: "Otros", img: imgHombre },
        { label: "Pelos", cat: "Belleza & Accesorios", subcat: "Pelo", img: pelo },
        { label: "Joyas", cat: "Belleza & Accesorios", subcat: "Joyas", img: joyas },
-       { label: "Maquillaje", cat: "Belleza & Accesorios", subcat: "Otros", img: imgHombre },
+       { label: "Maquillaje", cat: "Belleza & Accesorios", subcat: "Maquillaje", img: belleza },
 
       // { label: "Niños y Bebés", cat: "Complementos para peques", subcat: "Niños", img: imgKids },
       // { label: "Jerséis y Cárdigans", cat: "Moda & Accesorios", subcat: "Otros", img: imgJerseys },
-      { label: "Sudaderas", cat: "Moda & Accesorios", subcat: "Otros", img: imgSudaderas },
-      { label: "Abrigos y Chaquetas", cat: "Moda & Accesorios", subcat: "Otros", img: imgAbrigos },
+      { label: "Tacones & Sandalias", cat: "Moda & Accesorios", subcat: "Calzado", img: tacones },
+             { label: "Moda Infantil", cat: "Complementos para peques", subcat: "Moda", img: infantil },
+             { label: "Recien nacidos", cat: "Complementos para peques", subcat: "Bebés", img: recien },
+
+      { label: "Otros", cat: "Moda & Accesorios", subcat: "Otros", img: imglenceria },
+             { label: "Mas belleza", cat: "Belleza & Accesorios", subcat: "Otros", img: mas },
+
     ],
     []
   );

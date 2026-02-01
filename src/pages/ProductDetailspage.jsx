@@ -354,14 +354,7 @@ function StickyPromoSMS({
           </Box>
         </Stack>
 
-        <Button
-          size="small"
-          variant="contained"
-          onClick={onCopy}
-          sx={{ borderRadius: 999, fontWeight: 900, px: 1.5, flex: "0 0 auto" }}
-        >
-          Copiar código
-        </Button>
+  
       </Paper>
     </Box>
   );
@@ -613,6 +606,7 @@ export default function ProductDetailsPage() {
     const duration = shippingDuration(shipCity, shipMethod);
 
     const pesoTipo = product.Peso ?? product.peso ?? "";
+    console.log(pesoTipo, product.Vendedor)
     const dimensionTipo = product.Dimension ?? product.dimension ?? "";
 
     const ship = estimateShippingFromProduct(shipCity, {
@@ -900,8 +894,7 @@ export default function ProductDetailsPage() {
       {/* ✅ SMS promo siempre visible */}
       <StickyPromoSMS
         message="🎉 10% de descuento en tu primera compra"
-        sub="Usa el código: PRIMERA10"
-        onCopy={onCopyPromo}
+        sub="No pierdas esta oportunidad y unete al chekeo"
       />
 
       {/* Loader global mientras se guarda en carrito */}
@@ -929,7 +922,7 @@ export default function ProductDetailsPage() {
           <>
             <Paper elevation={0} sx={{ p: { xs: 2, md: 3 }, borderRadius: 3 }}>
               <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-                {fromCache && <Chip size="small" color="success" label="Cache" />}
+                {/* {fromCache && <Chip size="small" color="success" label="Cache" />} */}
               </Stack>
 
               <Box

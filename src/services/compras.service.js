@@ -53,7 +53,8 @@ export async function createCompraDualFS({
   compraId,
   compraData,
   userInfo,     // opcional: si quieres forzar id (ej: orderId)
-  img
+  img,
+  descuento,
 }) {
   if (!userId) throw new Error("userId requerido");
     if (!img) throw new Error("img requerido");
@@ -118,7 +119,8 @@ export async function createCompraDualFS({
 
       Servicios: idsCreados,
         Estado:estado,
-        Usuario:userId
+        Usuario:userId,
+        Descuento:descuento
 
 
      
@@ -243,4 +245,23 @@ export async function cancelCompraDualFS({
   if (!snap.exists()) return null;
 
   return { id: snap.id, ...snap.data() };
+}
+
+export async function checkCompras({ userId }) {
+  if (!userId) return false;
+
+  try {
+    const comprasRef = collection(db, BUYERS_COL, userId, USER_PURCHASES_SUBCOL);
+
+    console.log(userId)
+    // solo intentamos leer 1 documento (más eficiente)
+    const q = query(comprasRef, limit(1));
+    const snap = await getDocs(q);
+    
+
+    return !snap.empty; // true si existe al menos un doc
+  } catch (error) {
+    console.error("Error verificando miscompras:", error);
+    return false;
+  }
 }

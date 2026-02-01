@@ -174,12 +174,15 @@ export default function SearchResultsPage() {
               onChange={(e) => updateParams({ sort: e.target.value })}
               sx={{ minWidth: 180 }}
             >
+             <MenuItem value="relevance">Por defecto</MenuItem>
+
               <MenuItem value="newest">Más nuevos</MenuItem>
+              
               <MenuItem value="price_asc">Precio (↑)</MenuItem>
               <MenuItem value="price_desc">Precio (↓)</MenuItem>
             </TextField>
 
-            <TextField
+            {/* <TextField
               size="small"
               label="Precio mínimo"
               value={min ?? ""}
@@ -192,15 +195,15 @@ export default function SearchResultsPage() {
               value={max ?? ""}
               onChange={(e) => updateParams({ max: e.target.value || "" })}
               sx={{ width: { xs: "100%", md: 160 } }}
-            />
+            /> */}
 
-            <Button
+            {/* <Button
               variant="outlined"
               onClick={() => updateParams({ cat: "ALL", sort: "newest", min: "", max: "" })}
               sx={{ ml: { md: "auto" } }}
             >
               Limpiar filtros
-            </Button>
+            </Button> */}
           </Stack>
         </Paper>
 

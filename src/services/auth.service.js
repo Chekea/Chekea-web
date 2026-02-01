@@ -7,7 +7,9 @@ import {
   onAuthStateChanged,
 } from "firebase/auth";
 
-import { auth } from  "../config/firebase"; // asegúrate de exportar auth desde tu firebase.js
+import { doc, setDoc, serverTimestamp } from "firebase/firestore"; // ✅ añadido
+import { auth, db } from "../config/firebase"; // ✅ db añadido (no cambia nada más)
+import { Email } from "@mui/icons-material";
 
 function mapFirebaseUser(u) {
   if (!u) return null;
@@ -46,6 +48,17 @@ export const authService = {
     if (name?.trim()) {
       await updateProfile(cred.user, { displayName: name.trim() });
     }
+
+    // ✅ Guardar en Firestore al crear usuario
+    await setDoc(doc(db, "compradores", cred.user.uid), {
+      uid: cred.user.uid,
+      Email: cred.user.email ?? "",
+      Nombre: name?.trim() ?? "",
+      Img: cred.user.photoURL ?? "",
+      Contacto: cred.user.phoneNumber ?? "",
+      createdAt: serverTimestamp(),
+    });
+
     // refresca user con displayName actualizado
     return mapFirebaseUser(auth.currentUser);
   },

@@ -53,7 +53,7 @@ function buildSort(sort) {
     case "price_desc":
       return { field: "Precio", dir: "desc" };
     case "newest":
-      return { field: "Fecha", dir: "desc" };
+      return { field: "Fecha", dir: "asc" };
     case "relevance":
     default:
       return { field: "Fecha", dir: "desc" };
@@ -70,10 +70,11 @@ export async function getProductsPageFirestore({
   pageSize = 12,
   category = "ALL",
   subcategory = "ALL",
-  sort = "relevance",
+  sort = "newest",
   queryText = "",
   lastDoc = null,
 }) {
+  
   const qText = normalizeQueryText(queryText);
   const { field, dir } = buildSort(sort);
 

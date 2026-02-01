@@ -13,6 +13,8 @@ import {
   Backdrop,
   CircularProgress,
   LinearProgress,
+  Chip,
+  Collapse,
 } from "@mui/material";
 
 import Header from "../components/header";
@@ -25,19 +27,31 @@ import {
   uploadBytesResumable,
 } from "firebase/storage";
 import { storage } from "../config/firebase";
-import { compressImage } from "../utils/Helpers";
+
+import { compressImage, puntodecimal } from "../utils/Helpers";
+
+// ✅ Tu imagen guía local (ya la tenías)
+import prueba from "../assets/homeCats/prueba.JPG";
 
 function safeNumber(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 }
 
-function calcTotal(items) {
+function calcProductsSubtotal(items) {
   if (!Array.isArray(items)) return 0;
   return items.reduce((acc, it) => {
     const price = safeNumber(it?.precio ?? it?.price ?? it?.Precio ?? 0, 0);
     const qty = Math.max(1, safeNumber(it?.qty ?? it?.cantidad ?? 1, 1));
     return acc + price * qty;
+  }, 0);
+}
+
+function calcShippingTotal(items) {
+  if (!Array.isArray(items)) return 0;
+  return items.reduce((acc, it) => {
+    const envio = safeNumber(it?.Envio ?? it?.envio ?? 0, 0);
+    return acc + envio;
   }, 0);
 }
 
@@ -49,7 +63,9 @@ export default function VerifyUploadPage() {
   const auth = useAuth();
   const userId = auth?.user?.uid ?? null;
 
-  const itemsToPay = location.state?.itemsToPay ?? null;
+  const itemsToPay = location.state?.itemsToPay ?? [];
+  const discountAmount = safeNumber(location.state?.discountAmount ?? 0, 0);
+  const finalTotalToPayFromCheckout = location.state?.finalTotalToPay;
 
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
@@ -62,28 +78,72 @@ export default function VerifyUploadPage() {
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadingText, setLoadingText] = useState("Enviando comprobante...");
+  const [submitted, setSubmitted] = useState(false);
 
-  const [submitted, setSubmitted] = useState(false); // ✅ NUEVO: bloqueo tras éxito
+  // ✅ Mostrar/ocultar guía imagen banco
+  const [showBankGuide, setShowBankGuide] = useState(false);
+
+  // ✅ Mostrar/ocultar datos sensibles de cuenta
+  const [showAccountDetails, setShowAccountDetails] = useState(false);
+
+  // ✅ Feedback copiar
+  const [copied, setCopied] = useState("");
 
   const nombreOk = nombre.trim().length >= 3;
   const contactoOk = contacto.trim().length >= 6;
 
-  // ✅ si ya se envió con éxito, no permitir resubir
-  const canSubmit = !!file && nombreOk && contactoOk && !!userId && !loading && !submitted;
+  const canSubmit =
+    !!file && nombreOk && contactoOk && !!userId && !loading && !submitted;
 
-  const computedTotal = useMemo(() => calcTotal(itemsToPay), [itemsToPay]);
+  const productsSubtotal = useMemo(
+    () => calcProductsSubtotal(itemsToPay),
+    [itemsToPay]
+  );
+  const shippingTotal = useMemo(
+    () => calcShippingTotal(itemsToPay),
+    [itemsToPay]
+  );
 
-  const buildUserInfo = () => ({
-    nombre: nombre.trim(),
-    contacto: contacto.trim(),
-  });
+  const computedFinalTotal = useMemo(() => {
+    const total = productsSubtotal - discountAmount + shippingTotal;
+    return Number(total.toFixed(2));
+  }, [productsSubtotal, discountAmount, shippingTotal]);
 
-  // ✅ limpiar preview url
+  const finalTotalToPay = useMemo(() => {
+    const n = safeNumber(finalTotalToPayFromCheckout, NaN);
+    if (Number.isFinite(n)) return Number(n.toFixed(2));
+    return computedFinalTotal;
+  }, [finalTotalToPayFromCheckout, computedFinalTotal]);
+
+  const codeShort = useMemo(() => `Ch-${String(orderId ?? "").slice(-5)}`, [orderId]);
+  // const fullCode = useMemo(() => `Ch-${orderId}`, [orderId]); // si lo necesitas más tarde
+
+  const buildUserInfo = useCallback(
+    () => ({
+      nombre: nombre.trim(),
+      contacto: contacto.trim(),
+    }),
+    [nombre, contacto]
+  );
+
+  // ✅ Limpieza previewUrl
   useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
+
+  // ✅ Seguridad UX: si se envió, ocultar datos sensibles
+  useEffect(() => {
+    if (submitted) setShowAccountDetails(false);
+  }, [submitted]);
+
+  // ✅ Auto-ocultar datos sensibles después de X segundos (opcional, recomendado)
+  useEffect(() => {
+    if (!showAccountDetails) return;
+    const t = setTimeout(() => setShowAccountDetails(false), 20000); // 20s
+    return () => clearTimeout(t);
+  }, [showAccountDetails]);
 
   const handleFileChange = useCallback(
     (event) => {
@@ -101,7 +161,7 @@ export default function VerifyUploadPage() {
       }
 
       try {
-        if (!selected.type.startsWith("image/")) {
+        if (!selected.type?.startsWith("image/")) {
           throw new Error("Archivo no permitido (solo imágenes)");
         }
 
@@ -167,7 +227,9 @@ export default function VerifyUploadPage() {
         task.on(
           "state_changed",
           (snap) => {
-            const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
+            const pct = Math.round(
+              (snap.bytesTransferred / snap.totalBytes) * 100
+            );
             setUploadPct(pct);
           },
           reject,
@@ -177,10 +239,89 @@ export default function VerifyUploadPage() {
 
       const url = await getDownloadURL(snapshot.ref);
 
-      return { url, path, filename: webpFile.name, contentType: webpFile.type, size: webpFile.size };
+      return {
+        url,
+        path,
+        filename: webpFile.name,
+        contentType: webpFile.type,
+        size: webpFile.size,
+      };
     },
     []
   );
+
+  const handleCopy = useCallback(async (text, label) => {
+    try {
+      await navigator.clipboard.writeText(String(text));
+      setCopied(`${label} copiado`);
+      setTimeout(() => setCopied(""), 1500);
+    } catch {
+      setCopied("No se pudo copiar");
+      setTimeout(() => setCopied(""), 1500);
+    }
+  }, []);
+
+  const handleSubmit = useCallback(async () => {
+    setErr("");
+    setOk("");
+    setLoading(true);
+    setLoadingText("Enviando comprobante...");
+    setUploadPct(0);
+
+    try {
+      if (!userId) throw new Error("Debes iniciar sesión");
+      if (!file) throw new Error("Debes seleccionar una imagen");
+      if (!nombreOk) throw new Error("Escribe tu nombre y apellidos");
+      if (!contactoOk) throw new Error("Escribe tu contacto (Tel/WhatsApp)");
+
+      const uploadRes = await uploadVerificationToStorage({
+        orderId,
+        userId,
+        imageFile: file,
+      });
+
+      const imageUrl = uploadRes?.url ?? null;
+
+      setLoadingText("Guardando datos del pedido...");
+
+      await createCompraDualFS({
+        userId,
+        compraId: orderId,
+        userInfo: buildUserInfo(),
+        compraData: Array.isArray(itemsToPay) ? itemsToPay : [],
+        img: imageUrl,
+        descuento: discountAmount,
+        total: finalTotalToPay,
+      });
+
+      setOk(
+        "Comprobante enviado correctamente. Estado: PENDIENTE DE VERIFICACIÓN."
+      );
+      setSubmitted(true);
+    } catch (e) {
+      console.error(e);
+      setErr(e?.message || "No se pudo enviar. Inténtalo de nuevo.");
+    } finally {
+      setLoading(false);
+      setLoadingText("Enviando comprobante...");
+    }
+  }, [
+    userId,
+    file,
+    nombreOk,
+    contactoOk,
+    orderId,
+    uploadVerificationToStorage,
+    buildUserInfo,
+    itemsToPay,
+    discountAmount,
+    finalTotalToPay,
+  ]);
+
+  // ✅ Datos sensibles (si quieres, muévelos a env/DB)
+  const accountHolder = "ANA SOLEDAD MAYOMBI BOTOCO";
+  const phoneToRecharge = "555 549928";
+  const helpPhone = "222 237169";
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
@@ -198,7 +339,9 @@ export default function VerifyUploadPage() {
             {uploadPct > 0 && uploadPct < 100 && (
               <Box sx={{ width: "100%" }}>
                 <LinearProgress variant="determinate" value={uploadPct} />
-                <Typography sx={{ mt: 1, textAlign: "center" }}>{uploadPct}%</Typography>
+                <Typography sx={{ mt: 1, textAlign: "center" }}>
+                  {uploadPct}%
+                </Typography>
               </Box>
             )}
           </Stack>
@@ -212,7 +355,7 @@ export default function VerifyUploadPage() {
           </Typography>
 
           <Typography sx={{ color: "text.secondary", mt: 0.5 }}>
-            Pedido Id: Ch-<b>{orderId}</b>
+            Pedido ID: <Chip size="small" label={codeShort} sx={{ ml: 1 }} />
           </Typography>
 
           <Divider sx={{ my: 2 }} />
@@ -226,9 +369,36 @@ export default function VerifyUploadPage() {
             </Alert>
           )}
 
+          {/* RESUMEN */}
+          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2 }}>
+            <Stack spacing={0.5}>
+              <Typography sx={{ fontWeight: 900 }}>Resumen</Typography>
+              <Typography sx={{ fontWeight: 700 }}>
+                Productos: XFA {puntodecimal(productsSubtotal)}
+              </Typography>
+              <Typography sx={{ fontWeight: 700 }}>
+                Envío: XFA {puntodecimal(shippingTotal)}
+              </Typography>
+              {discountAmount > 0 && (
+                <Typography sx={{ fontWeight: 800, color: "success.main" }}>
+                  Descuento: -XFA {puntodecimal(discountAmount)}
+                </Typography>
+              )}
+              <Divider />
+              <Typography sx={{ fontWeight: 900 }}>
+                Total a pagar: XFA {puntodecimal(finalTotalToPay)}
+              </Typography>
+              <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                En el pago, usa este código: <b>{codeShort}</b>
+              </Typography>
+            </Stack>
+          </Paper>
+
           <Divider sx={{ my: 2 }} />
 
-          <Typography sx={{ fontWeight: 900 }}>Datos del comprador</Typography>
+          <Typography sx={{ fontWeight: 900, mb: 1 }}>
+            Datos del comprador
+          </Typography>
 
           <Stack spacing={1.5} sx={{ mb: 2 }}>
             <TextField
@@ -250,27 +420,198 @@ export default function VerifyUploadPage() {
 
           <Divider sx={{ my: 2 }} />
 
-          {err && <Alert severity="error" sx={{ mb: 2 }}>{err}</Alert>}
-          {ok && <Alert severity="success" sx={{ mb: 2 }}>{ok}</Alert>}
+          {err && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {err}
+            </Alert>
+          )}
+          {ok && (
+            <Alert severity="success" sx={{ mb: 2 }}>
+              {ok}
+            </Alert>
+          )}
 
-          <Typography sx={{ fontWeight: 900 }}>Instrucciones para completar el proceso</Typography>
-
-          {/* Paso 1: Ingreso al local físico */}
-          <Typography sx={{ mb: 2 }}>
-            Opcion 1: Ingresa al local físico ubicado en la rotonda de Cine Rial. Contacto: <strong>222222</strong>
+          {/* INSTRUCCIONES */}
+          <Typography sx={{ fontWeight: 900, mb: 1 }}>
+            ¿Cómo completar el pago?
+          </Typography>
+          <Typography sx={{ color: "text.secondary", mb: 2 }}>
+            Elige una opción. Cuando termines, sube una foto o captura del
+            comprobante abajo.
           </Typography>
 
-          {/* Paso 2: Ingreso bancario */}
-          <Typography sx={{ mb: 2 }}>
-            Opcion 2: Realiza el ingreso bancario. Número de cuenta: <strong>XXX-XXXX-XXXX</strong> y Nombre del titular: <strong>Nombre Banco</strong>
+          {/* Opción 1 */}
+          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2 }}>
+            <Typography sx={{ fontWeight: 900, mb: 1 }}>
+              Opción 1: Pago presencial (en Oficina)
+            </Typography>
+
+            <Stack spacing={1}>
+              <Typography>
+                1) Ve a la Oficina en <b>la rotonda de Cine Rial</b>.
+              </Typography>
+              <Typography>
+                2) Indica el código del pedido: <b>{codeShort}</b>.
+              </Typography>
+              <Typography>
+                3) Realiza el pago y pide un comprobante (recibo / ticket).
+              </Typography>
+              <Typography>
+                4) Sube aquí una foto clara del comprobante para validar tu
+                pedido.
+              </Typography>
+
+              <Alert severity="info">
+                Ayuda / WhatsApp / Teléfono: <b>{helpPhone}</b>
+              </Alert>
+            </Stack>
+          </Paper>
+
+          {/* Opción 2 */}
+          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+            <Typography sx={{ fontWeight: 900, mb: 1 }}>
+              Opción 2: BGFI Mobile ingreso
+            </Typography>
+
+            <Stack spacing={1}>
+              <Typography>1) Abre tu app y selecciona “Ingreso”.</Typography>
+
+              {/* ✅ guía de seguridad + botón */}
+              <Alert severity="info" sx={{ mb: 0.5 }}>
+                Por seguridad, los datos de ingreso están ocultos. Pulsa{" "}
+                <b>“Ver datos para ingresar”</b> y asegúrate de poner{" "}
+                <b>{codeShort}</b> en “Concepto / Referencia”.
+              </Alert>
+
+              <Button
+                variant="contained"
+                onClick={() => setShowAccountDetails((v) => !v)}
+                disabled={loading || submitted}
+                sx={{ alignSelf: "flex-start" }}
+              >
+                {showAccountDetails ? "Ocultar datos" : "Ver datos para ingresar"}
+              </Button>
+
+              <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                Paso 1: Pulsa “Ver datos”. Paso 2: Haz el ingreso. Paso 3: Guarda
+                el comprobante (recibo de banco). 
+              </Typography>
+
+              <Collapse in={showAccountDetails}>
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    mt: 1,
+                    p: 2,
+                    borderRadius: 2,
+                    bgcolor: "background.paper",
+                  }}
+                >
+                  <Stack spacing={1}>
+                    <Typography sx={{ fontWeight: 900 }}>
+                      Datos para ingresar
+                    </Typography>
+
+                    <Box
+                      sx={{
+                        p: 1.5,
+                        borderRadius: 2,
+                        bgcolor: "background.default",
+                        border: "1px dashed",
+                        borderColor: "divider",
+                      }}
+                    >
+                      <Typography>
+                        <b>Titular:</b> {accountHolder}
+                      </Typography>
+                      <Typography>
+                        <b>Teléfono a recargar:</b> {phoneToRecharge}
+                      </Typography>
+                    </Box>
+
+                   
+
+                    {copied && <Alert severity="success">{copied}</Alert>}
+
+                    <Alert severity="info">
+                      *Se ocultará automáticamente en unos segundos por
+                      seguridad.
+                    </Alert>
+                  </Stack>
+                </Paper>
+              </Collapse>
+
+         
+              <Typography>
+                4) Sube una foto o captura clara del comprobante abajo.
+              </Typography>
+
+              {/* ✅ NUEVO: botón para mostrar imagen guía */}
+              <Button
+                variant="text"
+                onClick={() => setShowBankGuide((v) => !v)}
+                disabled={loading || submitted}
+                sx={{ alignSelf: "flex-start", mt: 0.5 }}
+              >
+                {showBankGuide
+                  ? "Ocultar guía de relleno del banco"
+                  : "Ver guía: cómo rellenar en el banco"}
+              </Button>
+
+              <Collapse in={showBankGuide}>
+                <Box
+                  sx={{
+                    mt: 1,
+                    borderRadius: 2,
+                    overflow: "hidden",
+                    border: "1px solid",
+                    borderColor: "divider",
+                  }}
+                >
+                  <Box
+                    component="img"
+                    src={prueba}
+                    alt="Guía de transferencia (ejemplo)"
+                    sx={{
+                      width: "100%",
+                      display: "block",
+                      maxHeight: 320,
+                      objectFit: "contain",
+                    }}
+                  />
+                </Box>
+
+                <Typography
+                  variant="body2"
+                  sx={{ mt: 1, color: "text.secondary" }}
+                >
+                  *Ejemplo ilustrativo. Asegúrate de colocar el código{" "}
+                  <b>{codeShort}</b> en “Concepto / Referencia”.
+                </Typography>
+              </Collapse>
+
+              <Alert severity="warning">
+                Recuerda verificar todo antes de ingresar. Tu pago puede tardar
+                más en verificarse si algo sale mal.
+              </Alert>
+            </Stack>
+          </Paper>
+
+          <Divider sx={{ my: 2 }} />
+
+          <Typography sx={{ fontWeight: 900, mb: 0.5 }}>
+            Después de subir el comprobante
+          </Typography>
+          <Typography sx={{ color: "text.secondary" }}>
+            Tu pedido quedará en estado <b>PENDIENTE DE VERIFICACIÓN</b>. Te
+            contactaremos si necesitamos confirmar algún detalle.
           </Typography>
 
-          {/* Paso 3: Código de la compra */}
-          <Typography sx={{ mb: 2 }}>
-           IMPORTANTE: Asegúrate de incluir el código de la compra al realizar el pago. Código: <strong>Ch-{orderId.slice(-5)}</strong>
-          </Typography>
+          <Divider sx={{ my: 2 }} />
 
-          <Typography sx={{ fontWeight: 900 }}>Subir comprobante</Typography>
+          <Typography sx={{ fontWeight: 900, mb: 1 }}>
+            Subir comprobante
+          </Typography>
 
           <input
             type="file"
@@ -281,7 +622,9 @@ export default function VerifyUploadPage() {
 
           {previewUrl && (
             <Box sx={{ mt: 2 }}>
-              <Typography sx={{ fontWeight: 800, mb: 1 }}>Vista previa</Typography>
+              <Typography sx={{ fontWeight: 800, mb: 1 }}>
+                Vista previa
+              </Typography>
 
               <Box
                 component="img"
@@ -316,45 +659,7 @@ export default function VerifyUploadPage() {
             fullWidth
             sx={{ mt: 2 }}
             disabled={!canSubmit}
-            onClick={async () => {
-              setErr("");
-              setOk("");
-              setLoading(true);
-              setUploadPct(0);
-
-              try {
-                if (!userId) throw new Error("Debes iniciar sesión");
-                if (!file) throw new Error("Debes seleccionar una imagen");
-
-                // 1) subir imagen con progreso
-                const uploadRes = await uploadVerificationToStorage({
-                  orderId,
-                  userId,
-                  imageFile: file,
-                });
-
-                const imageUrl = uploadRes?.url ?? null;
-
-                setLoadingText("Guardando datos del pedido...");
-
-                // 2) guardar compra (usa tus parámetros correctos)
-                await createCompraDualFS({
-                  userId,
-                  compraId: orderId,
-                  userInfo: buildUserInfo(),
-                  compraData: Array.isArray(itemsToPay) ? itemsToPay : [], 
-                  img: imageUrl, 
-                });
-
-                setOk("Comprobante enviado correctamente. Estado: PENDIENTE DE VERIFICACIÓN.");
-              } catch (e) {
-                console.error(e);
-                setErr(e?.message || "No se pudo enviar. Inténtalo de nuevo.");
-              } finally {
-                setLoading(false);
-                setLoadingText("Enviando comprobante...");
-              }
-            }}
+            onClick={handleSubmit}
           >
             {loading ? "Subiendo..." : "Enviar comprobante"}
           </Button>
