@@ -737,6 +737,7 @@ export default function ProductDetailsPage() {
       const precioReal = Number(mapped._finalPrice ?? 0);
       const Envio = Number(mapped.shipEstimate ?? 0);
       const Precio = precioReal;
+    const url =     window.location.href;
 
       const Img = activeImage ?? mapped.Imagen ?? mapped.image ?? "";
 
@@ -775,6 +776,7 @@ export default function ProductDetailsPage() {
         Vendedor,
         qty,
         Detalles,
+        link:url
       });
     } finally {
       setCartSaving(false);
@@ -802,6 +804,8 @@ export default function ProductDetailsPage() {
 
     const Titulo = mapped._title ?? "Producto";
     const Vendedor = mapped.vendedor;
+    const url =     window.location.href;
+
 
     const precioReal = Number(mapped._finalPrice ?? 0);
     const Envio = Number(mapped.shipEstimate ?? 0);
@@ -844,6 +848,7 @@ export default function ProductDetailsPage() {
       Vendedor,
       qty,
       Detalles,
+      link:url
     };
 
     nav("/checkout", { state: { buyNowItem } });

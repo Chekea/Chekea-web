@@ -30,6 +30,7 @@ export default function CheckoutPage() {
   const selectedIds = useMemo(() => new Set(selectedIdsArr), [selectedIdsArr]);
   const isBuyNow = Boolean(buyNowItem);
 
+
   // Items a pagar: buyNow o selección del carrito
   const itemsToPay = useMemo(() => {
     if (buyNowItem) return [buyNowItem];

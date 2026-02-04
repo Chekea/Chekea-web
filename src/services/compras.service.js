@@ -55,6 +55,8 @@ export async function createCompraDualFS({
   userInfo,     // opcional: si quieres forzar id (ej: orderId)
   img,
   descuento,
+  total,
+  envio
 }) {
   if (!userId) throw new Error("userId requerido");
     if (!img) throw new Error("img requerido");
@@ -87,8 +89,8 @@ export async function createCompraDualFS({
 
   const servicioCompleto = {
     ...itemSinId,
-    Codigo: idServicio,
-    Fecha: idServicio,
+    Codigo:  Number(idCompra),
+    Fecha:  Number(idCompra),
     Usuario: userId,
     Estado: estado,
   };
@@ -113,14 +115,16 @@ export async function createCompraDualFS({
     const compraCompleta = {
       ...userInfo,
 
-      id: idCompra,
-      Fecha: idCompra,
+      id: Number(idCompra),
+      Fecha: Number(idCompra),
       img:img,
 
       Servicios: idsCreados,
         Estado:estado,
         Usuario:userId,
-        Descuento:descuento
+        Descuento:descuento,
+        Total: total,
+        Envio:envio
 
 
      

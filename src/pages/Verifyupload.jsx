@@ -66,7 +66,11 @@ export default function VerifyUploadPage() {
   const itemsToPay = location.state?.itemsToPay ?? [];
   const discountAmount = safeNumber(location.state?.discountAmount ?? 0, 0);
   const finalTotalToPayFromCheckout = location.state?.finalTotalToPay;
+    const shipping = location.state?.shippingTotal;
 
+ console.log(shipping)
+
+  console.log(itemsToPay, finalTotalToPayFromCheckout)
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [uploadPct, setUploadPct] = useState(0);
@@ -121,7 +125,7 @@ export default function VerifyUploadPage() {
   const buildUserInfo = useCallback(
     () => ({
       nombre: nombre.trim(),
-      contacto: contacto.trim(),
+      contacto: Number(contacto.trim()),
     }),
     [nombre, contacto]
   );
@@ -292,6 +296,7 @@ export default function VerifyUploadPage() {
         img: imageUrl,
         descuento: discountAmount,
         total: finalTotalToPay,
+        envio: shipping
       });
 
       setOk(
