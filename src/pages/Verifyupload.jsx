@@ -66,11 +66,8 @@ export default function VerifyUploadPage() {
   const itemsToPay = location.state?.itemsToPay ?? [];
   const discountAmount = safeNumber(location.state?.discountAmount ?? 0, 0);
   const finalTotalToPayFromCheckout = location.state?.finalTotalToPay;
-    const shipping = location.state?.shippingTotal;
+  const shipping = location.state?.shippingTotal;
 
- console.log(shipping)
-
-  console.log(itemsToPay, finalTotalToPayFromCheckout)
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [uploadPct, setUploadPct] = useState(0);
@@ -96,6 +93,9 @@ export default function VerifyUploadPage() {
   const nombreOk = nombre.trim().length >= 3;
   const contactoOk = contacto.trim().length >= 6;
 
+  // ✅ Si submitted, bloquear TODO excepto “Volver”
+  const lockAfterSubmit = submitted;
+
   const canSubmit =
     !!file && nombreOk && contactoOk && !!userId && !loading && !submitted;
 
@@ -119,8 +119,10 @@ export default function VerifyUploadPage() {
     return computedFinalTotal;
   }, [finalTotalToPayFromCheckout, computedFinalTotal]);
 
-  const codeShort = useMemo(() => `Ch-${String(orderId ?? "").slice(-5)}`, [orderId]);
-  // const fullCode = useMemo(() => `Ch-${orderId}`, [orderId]); // si lo necesitas más tarde
+  const codeShort = useMemo(
+    () => `Ch-${String(orderId ?? "").slice(-5)}`,
+    [orderId]
+  );
 
   const buildUserInfo = useCallback(
     () => ({
@@ -142,15 +144,17 @@ export default function VerifyUploadPage() {
     if (submitted) setShowAccountDetails(false);
   }, [submitted]);
 
-  // ✅ Auto-ocultar datos sensibles después de X segundos (opcional, recomendado)
+  // ✅ Auto-ocultar datos sensibles después de X segundos
   useEffect(() => {
     if (!showAccountDetails) return;
-    const t = setTimeout(() => setShowAccountDetails(false), 20000); // 20s
+    const t = setTimeout(() => setShowAccountDetails(false), 20000);
     return () => clearTimeout(t);
   }, [showAccountDetails]);
 
   const handleFileChange = useCallback(
     (event) => {
+      if (lockAfterSubmit) return;
+
       const input = event.target;
       const selected = input.files?.[0] ?? null;
 
@@ -183,15 +187,16 @@ export default function VerifyUploadPage() {
         input.value = "";
       }
     },
-    [previewUrl]
+    [previewUrl, lockAfterSubmit]
   );
 
   const clearImage = useCallback(() => {
+    if (lockAfterSubmit) return;
     setFile(null);
     setUploadPct(0);
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl("");
-  }, [previewUrl]);
+  }, [previewUrl, lockAfterSubmit]);
 
   const uploadVerificationToStorage = useCallback(
     async ({ imageFile, orderId, userId }) => {
@@ -254,16 +259,20 @@ export default function VerifyUploadPage() {
     []
   );
 
-  const handleCopy = useCallback(async (text, label) => {
-    try {
-      await navigator.clipboard.writeText(String(text));
-      setCopied(`${label} copiado`);
-      setTimeout(() => setCopied(""), 1500);
-    } catch {
-      setCopied("No se pudo copiar");
-      setTimeout(() => setCopied(""), 1500);
-    }
-  }, []);
+  const handleCopy = useCallback(
+    async (text, label) => {
+      if (lockAfterSubmit) return;
+      try {
+        await navigator.clipboard.writeText(String(text));
+        setCopied(`${label} copiado`);
+        setTimeout(() => setCopied(""), 1500);
+      } catch {
+        setCopied("No se pudo copiar");
+        setTimeout(() => setCopied(""), 1500);
+      }
+    },
+    [lockAfterSubmit]
+  );
 
   const handleSubmit = useCallback(async () => {
     setErr("");
@@ -296,12 +305,11 @@ export default function VerifyUploadPage() {
         img: imageUrl,
         descuento: discountAmount,
         total: finalTotalToPay,
-        envio: shipping
+        envio: shipping,
       });
 
-      setOk(
-        "Comprobante enviado correctamente. Estado: PENDIENTE DE VERIFICACIÓN."
-      );
+      // ✅ SMS visible y estado final (bloquea acciones)
+      setOk("✅ Compra exitosa. Comprobante enviado.");
       setSubmitted(true);
     } catch (e) {
       console.error(e);
@@ -321,9 +329,10 @@ export default function VerifyUploadPage() {
     itemsToPay,
     discountAmount,
     finalTotalToPay,
+    shipping,
   ]);
 
-  // ✅ Datos sensibles (si quieres, muévelos a env/DB)
+  // ✅ Datos sensibles
   const accountHolder = "ANA SOLEDAD MAYOMBI BOTOCO";
   const phoneToRecharge = "555 549928";
   const helpPhone = "222 237169";
@@ -331,6 +340,25 @@ export default function VerifyUploadPage() {
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
       <Header queryText="" onQueryChange={() => {}} />
+
+      {/* ✅ SMS fijo en pantalla (sin navegar) */}
+      {submitted && (
+        <Box
+          sx={{
+            position: "sticky",
+            top: 0,
+            zIndex: (t) => t.zIndex.appBar + 1,
+            px: 2,
+            py: 1.2,
+            bgcolor: "success.main",
+            color: "success.contrastText",
+          }}
+        >
+          <Typography sx={{ fontWeight: 900, textAlign: "center" }}>
+            ✅ Compra exitosa. Comprobante enviado.
+          </Typography>
+        </Box>
+      )}
 
       <Backdrop
         open={loading}
@@ -368,7 +396,12 @@ export default function VerifyUploadPage() {
           {!userId && (
             <Alert severity="warning" sx={{ mb: 2 }}>
               Debes iniciar sesión para enviar el comprobante.
-              <Button sx={{ ml: 1 }} size="small" onClick={() => nav("/login")}>
+              <Button
+                sx={{ ml: 1 }}
+                size="small"
+                onClick={() => nav("/login")}
+                disabled={loading || lockAfterSubmit}
+              >
                 Iniciar sesión
               </Button>
             </Alert>
@@ -411,7 +444,7 @@ export default function VerifyUploadPage() {
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}
               fullWidth
-              disabled={loading || submitted}
+              disabled={loading || lockAfterSubmit}
             />
 
             <TextField
@@ -419,7 +452,7 @@ export default function VerifyUploadPage() {
               value={contacto}
               onChange={(e) => setContacto(e.target.value)}
               fullWidth
-              disabled={loading || submitted}
+              disabled={loading || lockAfterSubmit}
             />
           </Stack>
 
@@ -481,7 +514,6 @@ export default function VerifyUploadPage() {
             <Stack spacing={1}>
               <Typography>1) Abre tu app y selecciona “Ingreso”.</Typography>
 
-              {/* ✅ guía de seguridad + botón */}
               <Alert severity="info" sx={{ mb: 0.5 }}>
                 Por seguridad, los datos de ingreso están ocultos. Pulsa{" "}
                 <b>“Ver datos para ingresar”</b> y asegúrate de poner{" "}
@@ -491,15 +523,17 @@ export default function VerifyUploadPage() {
               <Button
                 variant="contained"
                 onClick={() => setShowAccountDetails((v) => !v)}
-                disabled={loading || submitted}
+                disabled={loading || lockAfterSubmit}
                 sx={{ alignSelf: "flex-start" }}
               >
-                {showAccountDetails ? "Ocultar datos" : "Ver datos para ingresar"}
+                {showAccountDetails
+                  ? "Ocultar datos"
+                  : "Ver datos para ingresar"}
               </Button>
 
               <Typography variant="body2" sx={{ color: "text.secondary" }}>
                 Paso 1: Pulsa “Ver datos”. Paso 2: Haz el ingreso. Paso 3: Guarda
-                el comprobante (recibo de banco). 
+                el comprobante (recibo de banco).
               </Typography>
 
               <Collapse in={showAccountDetails}>
@@ -534,8 +568,6 @@ export default function VerifyUploadPage() {
                       </Typography>
                     </Box>
 
-                   
-
                     {copied && <Alert severity="success">{copied}</Alert>}
 
                     <Alert severity="info">
@@ -546,16 +578,14 @@ export default function VerifyUploadPage() {
                 </Paper>
               </Collapse>
 
-         
               <Typography>
                 4) Sube una foto o captura clara del comprobante abajo.
               </Typography>
 
-              {/* ✅ NUEVO: botón para mostrar imagen guía */}
               <Button
                 variant="text"
                 onClick={() => setShowBankGuide((v) => !v)}
-                disabled={loading || submitted}
+                disabled={loading || lockAfterSubmit}
                 sx={{ alignSelf: "flex-start", mt: 0.5 }}
               >
                 {showBankGuide
@@ -621,7 +651,7 @@ export default function VerifyUploadPage() {
           <input
             type="file"
             accept="image/*"
-            disabled={loading || submitted}
+            disabled={loading || lockAfterSubmit}
             onChange={handleFileChange}
           />
 
@@ -650,7 +680,7 @@ export default function VerifyUploadPage() {
                 <Button
                   variant="outlined"
                   fullWidth
-                  disabled={loading || submitted}
+                  disabled={loading || lockAfterSubmit}
                   onClick={clearImage}
                 >
                   Cambiar / quitar imagen
@@ -659,36 +689,39 @@ export default function VerifyUploadPage() {
             </Box>
           )}
 
-          <Button
-            variant="contained"
-            fullWidth
-            sx={{ mt: 2 }}
-            disabled={!canSubmit}
-            onClick={handleSubmit}
-          >
-            {loading ? "Subiendo..." : "Enviar comprobante"}
-          </Button>
-
-          {submitted && (
+          {/* ✅ Si submitted: NO permitir otro botón, solo “Volver” */}
+          {!submitted ? (
             <Button
-              sx={{ mt: 1 }}
+              variant="contained"
+              fullWidth
+              sx={{ mt: 2 }}
+              disabled={!canSubmit}
+              onClick={handleSubmit}
+            >
+              {loading ? "Subiendo..." : "Enviar comprobante"}
+            </Button>
+          ) : null}
+
+          {submitted ? (
+            <Button
+              sx={{ mt: 2 }}
+              fullWidth
+              variant="contained"
+              onClick={() => nav("/")}
+            >
+              Volver
+            </Button>
+          ) : (
+            <Button
+              sx={{ mt: 2 }}
               fullWidth
               variant="outlined"
-              onClick={() => nav("/miscompras")}
+              disabled={loading}
+              onClick={() => nav("/")}
             >
-              Ver mis compras
+              Volver a la tienda
             </Button>
           )}
-
-          <Button
-            sx={{ mt: 2 }}
-            fullWidth
-            variant="outlined"
-            disabled={loading}
-            onClick={() => nav("/")}
-          >
-            Volver a la tienda
-          </Button>
         </Paper>
       </Container>
     </Box>

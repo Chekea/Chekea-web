@@ -6,6 +6,9 @@ import { useAuth } from "../state/AuthContext";
 import { getFavoritesPageFS } from "../services/favorites.service";
 import ProductGrid from "../components/productgrid"; // ajusta la ruta si es distinta
 
+// ✅ Cache temporal en memoria (vive mientras la app esté abierta)
+const favCacheByUser = new Map(); // userId -> { primeraCargaHecha, items, lastDoc, hasNext, savedAt }
+
 export default function FavoritesPage() {
   const auth = useAuth();
   const nav = useNavigate();
@@ -27,25 +30,45 @@ export default function FavoritesPage() {
   const mappedItems = useMemo(() => {
     // 🔁 Convertimos favorito -> item compatible con ProductGrid
     return favDocs
-      .filter((f) => !!f.id) // sin ProductoId no podemos mostrarlo bien
+      .filter((f) => !!f.id)
       .map((f) => ({
-        // ✅ IMPORTANTE: id debe ser el id real del producto para que ProductGrid navegue al detalle
         id: f.ProdId,
-
-        // Campos típicos de producto (los que ya guardas en favoritos)
         Titulo: f.Titulo,
         Precio: f.Precio,
         Imagen: f.Imagen,
         Stock: f.Stock,
         Categoria: f.Categoria,
-
-        // Extra por si luego quieres quitar favorito desde la card
         Codigo: f.id,
       }));
   }, [favDocs]);
 
-  async function loadFirstPage() {
+  function readCache() {
+    if (!userId) return null;
+    return favCacheByUser.get(userId) || null;
+  }
+
+  function writeCache(next) {
     if (!userId) return;
+    favCacheByUser.set(userId, { ...next, primeraCargaHecha: true, savedAt: Date.now() });
+  }
+
+  async function loadFirstPage({ force = false } = {}) {
+    if (!userId) return;
+
+    // ✅ Si NO es forzado: al volver atrás usamos cache y NO llamamos backend
+    if (!force) {
+      const cached = readCache();
+      if (cached?.primeraCargaHecha) {
+        setFavDocs(cached.items || []);
+        setLastDoc(cached.lastDoc || null);
+        setHasNext(!!cached.hasNext);
+        setError("");
+        setLoading(false);
+        return;
+      }
+    }
+
+    // ✅ Primera vez o forzado => llamar backend
     setLoading(true);
     setError("");
     try {
@@ -53,6 +76,8 @@ export default function FavoritesPage() {
       setFavDocs(res.items);
       setLastDoc(res.lastDoc);
       setHasNext(res.hasNext);
+
+      writeCache({ items: res.items, lastDoc: res.lastDoc, hasNext: res.hasNext });
     } catch (e) {
       setError(e?.message || "Error cargando favoritos");
     } finally {
@@ -66,7 +91,13 @@ export default function FavoritesPage() {
     setError("");
     try {
       const res = await getFavoritesPageFS({ userId, pageSize: 12, lastDoc });
-      setFavDocs((prev) => [...prev, ...res.items]);
+
+      setFavDocs((prev) => {
+        const merged = [...prev, ...res.items];
+        writeCache({ items: merged, lastDoc: res.lastDoc, hasNext: res.hasNext });
+        return merged;
+      });
+
       setLastDoc(res.lastDoc);
       setHasNext(res.hasNext);
     } catch (e) {
@@ -82,8 +113,9 @@ export default function FavoritesPage() {
   }, [userId]);
 
   return (
-    <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
+    <Box sx={{ minHeight: "100vh", bgcolor: "background.default", position: "relative" }}>
       <Header queryText="" onQueryChange={() => {}} />
+
       <Container maxWidth="lg" sx={{ px: { xs: 1, sm: 2 }, py: { xs: 2, md: 3 } }}>
         <Paper elevation={0} sx={{ p: 3, borderRadius: 3 }}>
           <Typography variant="h5" sx={{ fontWeight: 900 }}>
@@ -94,15 +126,9 @@ export default function FavoritesPage() {
           </Typography>
 
           <Stack spacing={2} sx={{ mt: 2 }}>
-            {error ? (
-              <Typography sx={{ color: "error.main" }}>{error}</Typography>
-            ) : null}
+            {error ? <Typography sx={{ color: "error.main" }}>{error}</Typography> : null}
 
-            {/* ✅ AQUÍ va tu grid ya existente */}
-            <ProductGrid
-              items={mappedItems}
-              loading={loading && favDocs.length === 0}
-            />
+            <ProductGrid items={mappedItems} loading={loading && favDocs.length === 0} />
 
             {!loading && mappedItems.length === 0 ? (
               <Typography sx={{ color: "text.secondary" }}>
@@ -122,6 +148,25 @@ export default function FavoritesPage() {
           </Stack>
         </Paper>
       </Container>
+
+      {/* ✅ Botón flotante profesional: forzar refresh (salta el cache y actualiza cache) */}
+      <Button
+        variant="contained"
+        onClick={() => loadFirstPage({ force: true })}
+        disabled={loading}
+        sx={{
+          position: "fixed",
+          right: 16,
+          bottom: 16,
+          borderRadius: 999,
+          px: 2.5,
+          py: 1.25,
+          boxShadow: 6,
+          zIndex: 1300,
+        }}
+      >
+        {loading ? "Actualizando..." : "Actualizar"}
+      </Button>
     </Box>
   );
 }
