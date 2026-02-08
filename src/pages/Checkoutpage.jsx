@@ -18,6 +18,20 @@ import { useAuth } from "../state/AuthContext";
 import { puntodecimal } from "../utils/Helpers";
 import { getCurrentTimestamp, checkCompras } from "../services/compras.service";
 
+/** ✅ guardar hasPurchased por usuario en sessionStorage */
+const HAS_PURCHASED_SESSION_KEY = "hasPurchasedByUser";
+function saveHasPurchasedForUser(uid, value) {
+  if (!uid) return;
+  try {
+    const raw = sessionStorage.getItem(HAS_PURCHASED_SESSION_KEY);
+    const map = raw ? JSON.parse(raw) : {};
+    map[uid] = Boolean(value);
+    sessionStorage.setItem(HAS_PURCHASED_SESSION_KEY, JSON.stringify(map));
+  } catch {
+    // ignore
+  }
+}
+
 export default function CheckoutPage() {
   const cart = useCart();
   const nav = useNavigate();
@@ -29,7 +43,6 @@ export default function CheckoutPage() {
 
   const selectedIds = useMemo(() => new Set(selectedIdsArr), [selectedIdsArr]);
   const isBuyNow = Boolean(buyNowItem);
-
 
   // Items a pagar: buyNow o selección del carrito
   const itemsToPay = useMemo(() => {
@@ -51,18 +64,26 @@ export default function CheckoutPage() {
     async function run() {
       setErr("");
 
-      if (!auth.isAuthed || !auth.user?.uid) {
+      const uid = auth.user?.uid;
+
+      if (!auth.isAuthed || !uid) {
         if (alive) setHasPurchases(null);
         return;
       }
 
       try {
         if (alive) setHasPurchases(null); // verificando
-        const result = await checkCompras({ userId: auth.user.uid }); // true si tiene compras
-        if (alive) setHasPurchases(result);
+        const result = await checkCompras({ userId: uid }); // true si tiene compras
+        if (!alive) return;
+
+        setHasPurchases(result);
+        saveHasPurchasedForUser(uid, result); // ✅ guardado por usuario
       } catch (e) {
         console.error(e);
-        if (alive) setHasPurchases(true); // fallback: no descuento
+        if (!alive) return;
+
+        setHasPurchases(true); // fallback: no descuento
+        saveHasPurchasedForUser(uid, true); // ✅ guardado por usuario (fallback)
       }
     }
 
@@ -146,6 +167,18 @@ export default function CheckoutPage() {
           <Typography variant="h5" sx={{ fontWeight: 900 }}>
             Checkout
           </Typography>
+
+          {/* ✅ SMS / AVISO */}
+          <Alert severity="info" sx={{ mt: 2 }}>
+            <Typography sx={{ fontWeight: 900 }}>
+              Aviso importante sobre envíos
+            </Typography>
+            <Typography variant="body2" sx={{ mt: 0.5 }}>
+              Debido a las festividades del <b>Año Nuevo Chino</b>, las operaciones logísticas
+              se encuentran temporalmente pausadas. Los envíos se retomarán a partir del{" "}
+              <b>23 de febrero</b>.
+            </Typography>
+          </Alert>
 
           {err && (
             <Alert severity="error" sx={{ mt: 2 }}>
@@ -315,12 +348,7 @@ export default function CheckoutPage() {
                       Volver al producto
                     </Button>
                   ) : (
-                    <Button
-                      sx={{ mt: 1 }}
-                      fullWidth
-                      variant="outlined"
-                      onClick={handleGoCart}
-                    >
+                    <Button sx={{ mt: 1 }} fullWidth variant="outlined" onClick={handleGoCart}>
                       Volver a la caja
                     </Button>
                   )}

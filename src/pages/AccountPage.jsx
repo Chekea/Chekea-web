@@ -13,6 +13,7 @@ export default function AccountPage() {
     return null;
   }
 
+  console.log(auth)
   const [name, setName] = useState(auth.user?.name || "");
   const [phone, setPhone] = useState(auth.user?.phone || "");
 

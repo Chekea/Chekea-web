@@ -32,6 +32,7 @@ import { compressImage, puntodecimal } from "../utils/Helpers";
 
 // ✅ Tu imagen guía local (ya la tenías)
 import prueba from "../assets/homeCats/prueba.JPG";
+import { addInteraccionFS } from "../services/product.firesore.service";
 
 function safeNumber(v, fallback = 0) {
   const n = Number(v);
@@ -67,6 +68,7 @@ export default function VerifyUploadPage() {
   const discountAmount = safeNumber(location.state?.discountAmount ?? 0, 0);
   const finalTotalToPayFromCheckout = location.state?.finalTotalToPay;
   const shipping = location.state?.shippingTotal;
+
 
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
@@ -259,6 +261,19 @@ export default function VerifyUploadPage() {
     []
   );
 
+    const subirInteraccion = async ()=>{
+            const firstItem = itemsToPay[0];
+
+  if (firstItem?.sub && firstItem?.Producto) {
+    await addInteraccionFS({
+      userId,
+      subcategoria: firstItem.sub,
+      productId: firstItem.Producto,
+      cantidad: 8,
+    });
+  }
+    }
+
   const handleCopy = useCallback(
     async (text, label) => {
       if (lockAfterSubmit) return;
@@ -311,6 +326,10 @@ export default function VerifyUploadPage() {
       // ✅ SMS visible y estado final (bloquea acciones)
       setOk("✅ Compra exitosa. Comprobante enviado.");
       setSubmitted(true);
+
+      subirInteraccion()
+
+
     } catch (e) {
       console.error(e);
       setErr(e?.message || "No se pudo enviar. Inténtalo de nuevo.");

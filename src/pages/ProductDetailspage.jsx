@@ -57,6 +57,19 @@ const LS_SHIP_CITY = "chekea_ship_city_v1";
 const LS_SHIP_METHOD = "chekea_ship_method_v1";
 const SS_VIEW_PREFIX = "chekea_viewed_once_v1:";
 
+/** ✅ NUEVO: hasPurchased por usuario (guardado desde CheckoutPage) */
+const HAS_PURCHASED_SESSION_KEY = "hasPurchasedByUser";
+function readHasPurchasedForUser(uid) {
+  if (!uid) return null;
+  try {
+    const raw = sessionStorage.getItem(HAS_PURCHASED_SESSION_KEY);
+    const map = raw ? JSON.parse(raw) : {};
+    return Object.prototype.hasOwnProperty.call(map, uid) ? Boolean(map[uid]) : null;
+  } catch {
+    return null;
+  }
+}
+
 /* -------------------- SIMPLE CACHE (Memory + sessionStorage) -------------------- */
 const CACHE_PREFIX = "chekea_cache_v1:";
 const CACHE_TTL_MS = 2 * 60 * 1000; // 2 min
@@ -273,7 +286,7 @@ function CenterLoader({ text = "Cargando…" }) {
   );
 }
 
-/* -------------------- Promo SMS (siempre visible) -------------------- */
+/* -------------------- Promo SMS -------------------- */
 function StickyPromoSMS({
   message = "🎉 10% de descuento en tu primera compra",
   sub = "Usa el código: PRIMERA10",
@@ -353,8 +366,6 @@ function StickyPromoSMS({
             </Typography>
           </Box>
         </Stack>
-
-  
       </Paper>
     </Box>
   );
@@ -368,6 +379,13 @@ export default function ProductDetailsPage() {
   const cart = useCart();
   const auth = useAuth();
   const userId = auth?.user ? auth.user.uid : null;
+
+  /** ✅ NUEVO: controla banner promo */
+  const [hasPurchased, setHasPurchased] = useState(null);
+
+  useEffect(() => {
+    setHasPurchased(readHasPurchasedForUser(userId));
+  }, [userId]);
 
   const [product, setProduct] = useState(null);
   const [related, setRelated] = useState([]);
@@ -393,7 +411,7 @@ export default function ProductDetailsPage() {
 
   const [cartSaving, setCartSaving] = useState(false);
 
-  // ✅ NUEVO: leer más / leer menos (detalles)
+  // ✅ leer más / leer menos (detalles)
   const [detailsExpanded, setDetailsExpanded] = useState(false);
 
   useEffect(() => saveShipCity(shipCity), [shipCity]);
@@ -417,7 +435,7 @@ export default function ProductDetailsPage() {
       setSelectedColor(null);
       setSelectedStyle(null);
       setActiveImage(null);
-      setDetailsExpanded(false); // ✅ reset al cambiar de producto
+      setDetailsExpanded(false);
     };
 
     const hydrate = ({ p, c, s, imgs, rel }, isCached) => {
@@ -437,7 +455,7 @@ export default function ProductDetailsPage() {
       const primary = pickImgUrl(imgs?.[0]) ?? p?.Imagen ?? p?.image ?? null;
       setActiveImage(primary);
 
-      setDetailsExpanded(false); // ✅ siempre inicia colapsado
+      setDetailsExpanded(false);
     };
 
     (async () => {
@@ -606,7 +624,6 @@ export default function ProductDetailsPage() {
     const duration = shippingDuration(shipCity, shipMethod);
 
     const pesoTipo = product.Peso ?? product.peso ?? "";
-    console.log(pesoTipo, product.Vendedor)
     const dimensionTipo = product.Dimension ?? product.dimension ?? "";
 
     const ship = estimateShippingFromProduct(shipCity, {
@@ -682,7 +699,7 @@ export default function ProductDetailsPage() {
     if (favBusy) return;
 
     const productId = mapped._productKey;
-    const categoria = mapped.Categoria ?? "Otros";
+    const subcategoria = mapped.Subcategoria ?? "Otros";
 
     const next = !wishOn;
     setWishOn(next);
@@ -690,7 +707,7 @@ export default function ProductDetailsPage() {
 
     try {
       if (next) {
-        await addInteraccionFS({ userId, categoria, productId, cantidad: 2 });
+        await addInteraccionFS({ userId, subcategoria, productId, cantidad: 2 });
 
         const newFavId = await addToFavoritesFS({
           userId,
@@ -733,11 +750,13 @@ export default function ProductDetailsPage() {
     try {
       const Titulo = mapped._title ?? "Producto";
       const Vendedor = mapped.vendedor;
+      const producto = mapped._productKey;
 
       const precioReal = Number(mapped._finalPrice ?? 0);
       const Envio = Number(mapped.shipEstimate ?? 0);
       const Precio = precioReal;
-    const url =     window.location.href;
+      const url = window.location.href;
+      const subcategoria = mapped.Subcategoria ?? "Otros";
 
       const Img = activeImage ?? mapped.Imagen ?? mapped.image ?? "";
 
@@ -768,7 +787,7 @@ export default function ProductDetailsPage() {
         .join(" • ");
 
       await cart.add({
-        Producto: mapped._productKey,
+        Producto: producto,
         Titulo,
         Precio,
         Envio,
@@ -776,8 +795,9 @@ export default function ProductDetailsPage() {
         Vendedor,
         qty,
         Detalles,
-        link:url
+        link: url,
       });
+      await addInteraccionFS({ userId, subcategoria, producto, cantidad: 4 });
     } finally {
       setCartSaving(false);
     }
@@ -791,6 +811,7 @@ export default function ProductDetailsPage() {
     shipCity,
     selectedColor,
     selectedStyle,
+    userId,
   ]);
 
   // comprar ahora
@@ -804,8 +825,8 @@ export default function ProductDetailsPage() {
 
     const Titulo = mapped._title ?? "Producto";
     const Vendedor = mapped.vendedor;
-    const url =     window.location.href;
-
+    const url = window.location.href;
+    const subcategoria = mapped.Subcategoria ?? "Otros";
 
     const precioReal = Number(mapped._finalPrice ?? 0);
     const Envio = Number(mapped.shipEstimate ?? 0);
@@ -848,7 +869,8 @@ export default function ProductDetailsPage() {
       Vendedor,
       qty,
       Detalles,
-      link:url
+      link: url,
+      sub:subcategoria,
     };
 
     nav("/checkout", { state: { buyNowItem } });
@@ -875,32 +897,23 @@ export default function ProductDetailsPage() {
 
   const disableColorRequired = colors.length > 0 && !selectedColor;
 
-  // ✅ Acción del SMS: copia código
-  const onCopyPromo = useCallback(async () => {
-    const code = "PRIMERA10";
-    try {
-      await navigator.clipboard.writeText(code);
-      alert("Código copiado: PRIMERA10");
-    } catch {
-      alert("Copia manual: PRIMERA10");
-    }
-  }, []);
-
   // ✅ Detecta si hay “más” para mostrar el botón
   const hasMoreDetails = useMemo(() => {
     const txt = String(mapped?._details ?? "").trim();
-    return txt.length > 160; // heurística simple; evita botón si es muy corto
+    return txt.length > 160;
   }, [mapped?._details]);
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
       <Header queryText="" onQueryChange={() => {}} />
 
-      {/* ✅ SMS promo siempre visible */}
-      <StickyPromoSMS
-        message="🎉 10% de descuento en tu primera compra"
-        sub="No pierdas esta oportunidad y unete al chekeo"
-      />
+      {/* ✅ SOLO mostrar promo si sabemos que NO compró aún */}
+      {hasPurchased === false && (
+        <StickyPromoSMS
+          message="🎉 10% de descuento en tu primera compra"
+          sub="No pierdas esta oportunidad y unete al chekeo"
+        />
+      )}
 
       {/* Loader global mientras se guarda en carrito */}
       <Backdrop open={cartSaving} sx={{ color: "#fff", zIndex: (t) => t.zIndex.drawer + 999 }}>
@@ -1104,7 +1117,7 @@ export default function ProductDetailsPage() {
                   {/* Estilo */}
                   {styles.length > 0 && (
                     <>
-                      <Typography sx={{ mt: 2, fontWeight: 800 }}>Estilo</Typography>
+                      <Typography sx={{ mt: 2, fontWeight: 800 }}>Tallas</Typography>
                       <ToggleButtonGroup
                         value={selectedStyle?.id ?? null}
                         exclusive

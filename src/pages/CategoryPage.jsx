@@ -10,7 +10,11 @@ import {
   Stack,
 } from "@mui/material";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import {
+  useNavigate,
+  useSearchParams,
+  useNavigationType,
+} from "react-router-dom";
 
 import Header from "../components/header";
 import ProductGrid from "../components/productgrid";
@@ -21,13 +25,27 @@ import { getProductsPageFirestore } from "../services/product.firesore.service";
 const PAGE_SIZE = 12;
 
 const SUBCATS_BY_CAT = {
-  "Moda & Accesorios": ["Vestidos", "Calzado", "Bolsos", "Trajes", "Pantalones", "Camisas", "Otros"],
+  "Moda & Accesorios": [
+    "Vestidos",
+    "Calzado",
+    "Bolsos",
+    "Trajes",
+    "Pantalones",
+    "Camisas",
+    "Otros",
+  ],
   "Belleza & Accesorios": ["Maquillaje", "Pelo", "Joyas", "Otros"],
   "Complementos para peques": ["Bebés", "Niños", "Moda", "Otros"],
-  Hogar: ["Cocina", "Decoración", "Baño", "Sala de estar", "Dormitorio", "Iluminacion"],
+  Hogar: [
+    "Cocina",
+    "Decoración",
+    "Baño",
+    "Sala de estar",
+    "Dormitorio",
+    "Iluminacion",
+  ],
 };
 
-/* -------------------- Loader centrado -------------------- */
 function CenterLoader({ text = "Cargando productos…" }) {
   return (
     <Box sx={{ minHeight: "60vh", display: "grid", placeItems: "center" }}>
@@ -39,15 +57,10 @@ function CenterLoader({ text = "Cargando productos…" }) {
   );
 }
 
-/* ==================== CACHE (ya añadido) ====================
-   - Cache en memoria para volver atrás sin re-descargar
-   - TTL + LRU
-   - Guarda items/hasNext y lastDocsRef (cursores)
-============================================================== */
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 min
+/* ==================== CACHE (memoria) ==================== */
+const CACHE_TTL_MS = 5 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 60;
-
-const pageCache = new Map(); // key -> { ts, items, hasNext, lastDocByPage }
+const pageCache = new Map();
 
 function makePageKey(category, subcat, sort, page) {
   return `${category}__${subcat}__${sort}__p${page}`;
@@ -62,7 +75,7 @@ function cacheGet(key) {
     return null;
   }
 
-  // LRU touch
+  // LRU bump
   pageCache.delete(key);
   pageCache.set(key, hit);
   return hit;
@@ -70,18 +83,13 @@ function cacheGet(key) {
 
 function cacheSet(key, value) {
   pageCache.set(key, value);
-
-  // LRU trim
   while (pageCache.size > CACHE_MAX_ENTRIES) {
     const oldestKey = pageCache.keys().next().value;
     pageCache.delete(oldestKey);
   }
 }
 
-/* ==================== PERSISTENCIA PAGINACIÓN (NUEVO) ====================
-   Guarda/recupera el último "p" (y filtros) para volver atrás al mismo estado
-   incluso si la URL del detalle no conserva ?p=...
-============================================================================ */
+/* ==================== Persistencia: página ==================== */
 const LAST_STATE_STORAGE_KEY = "categoryPage:lastState";
 
 function makeCtxKey(category, subcat, sort) {
@@ -100,165 +108,238 @@ function readLastState() {
 function writeLastState(state) {
   try {
     sessionStorage.setItem(LAST_STATE_STORAGE_KEY, JSON.stringify(state));
+  } catch {}
+}
+
+/* ==================== Persistencia: cursor SOLO docId ==================== */
+const LAST_DOC_ID_BY_CTX_KEY = "categoryPage:lastDocIdByCtx";
+
+function readLastDocIdMap() {
+  try {
+    return JSON.parse(sessionStorage.getItem(LAST_DOC_ID_BY_CTX_KEY) || "{}");
   } catch {
-    // ignore
+    return {};
   }
 }
-/* ==================== /PERSISTENCIA PAGINACIÓN ==================== */
+
+function writeLastDocIdMap(map) {
+  try {
+    sessionStorage.setItem(LAST_DOC_ID_BY_CTX_KEY, JSON.stringify(map));
+  } catch {}
+}
+
+function getLastDocIdForCtx(ctxKey) {
+  return readLastDocIdMap()?.[ctxKey] ?? null;
+}
+
+function setLastDocIdForCtx(ctxKey, docId) {
+  if (!docId) return;
+  const map = readLastDocIdMap();
+  map[ctxKey] = docId;
+  writeLastDocIdMap(map);
+}
+
+function clearLastDocIdForCtx(ctxKey) {
+  const map = readLastDocIdMap();
+  delete map[ctxKey];
+  writeLastDocIdMap(map);
+}
 
 export default function CategoryPage() {
   const { t, i18n } = useTranslation();
   const nav = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  /* -------------------- URL params -------------------- */
+  // 👇 IMPORTANTE: congelamos el tipo de navegación SOLO al montar este componente.
+  // Así, los REPLACE internos (setSearchParams con replace:true) NO rompen la lógica.
+  const navType = useNavigationType(); // "PUSH" | "POP" | "REPLACE"
+  const entryNavTypeRef = useRef(null);
+  if (entryNavTypeRef.current === null) entryNavTypeRef.current = navType;
+  const entryNavType = entryNavTypeRef.current;
+
   const category = searchParams.get("cat") ?? "ALL";
   const subcat = searchParams.get("subcat") ?? "ALL";
   const sort = searchParams.get("sort") ?? "newest";
   const page = Number(searchParams.get("p") ?? 1);
 
-  /* -------------------- state -------------------- */
   const [queryText, setQueryText] = useState("");
   const [items, setItems] = useState([]);
   const [hasNext, setHasNext] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  /* 🔑 cursor por página (OBLIGATORIO en Firestore) */
+  // snapshots solo en memoria (para paginar dentro del mismo mount)
   const lastDocsRef = useRef({ 1: null });
+  const prevCtxRef = useRef(null);
 
-  /* -------------------- redirect si no hay categoría -------------------- */
-  useEffect(() => {
-    if (!category || category === "ALL") {
-      nav("/", { replace: true });
-    }
-  }, [category, nav]);
+  const ctxKey = useMemo(() => makeCtxKey(category, subcat, sort), [category, subcat, sort]);
+  const subcatsForCat = useMemo(() => SUBCATS_BY_CAT[category] ?? [], [category]);
 
-  /* -------------------- helpers -------------------- */
   const updateParams = useCallback(
     (patch) => {
       const next = new URLSearchParams(searchParams);
-      Object.entries(patch).forEach(([k, v]) => {
+      for (const [k, v] of Object.entries(patch)) {
         if (v === null || v === undefined) next.delete(k);
         else next.set(k, String(v));
-      });
+      }
       setSearchParams(next, { replace: true });
     },
     [searchParams, setSearchParams]
   );
 
-  const subcatsForCat = useMemo(() => {
-    return SUBCATS_BY_CAT[category] ?? [];
-  }, [category]);
+  // proteger ruta
+  useEffect(() => {
+    if (!category || category === "ALL") nav("/", { replace: true });
+  }, [category, nav]);
 
-  /* -------------------- RESTAURAR PAGINACIÓN AL VOLVER ATRÁS (NUEVO) --------------------
-     Si falta "p" en la URL (o es inválido), recupera el último estado guardado.
-     Esto es lo que hace que al volver del detalle regrese al mismo número de página.
-  -------------------------------------------------------------------------------------- */
+  // restaurar p si falta
   useEffect(() => {
     const hasP = searchParams.has("p");
     const pVal = Number(searchParams.get("p") ?? 0);
-
-    // solo restaurar si NO viene p válido
     if (hasP && Number.isFinite(pVal) && pVal >= 1) return;
 
     const last = readLastState();
     if (!last) return;
+    if (last?.ctxKey !== ctxKey) return;
 
-    // restaura solo si coincide el "contexto" (cat/subcat/sort)
-    const ctx = makeCtxKey(category, subcat, sort);
-    if (last?.ctxKey !== ctx) return;
-
-    // aplica p guardado (y respeta tu reemplazo)
     if (last?.p && Number.isFinite(last.p) && last.p >= 1) {
       updateParams({ p: last.p });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category, subcat, sort]);
+  }, [ctxKey]);
 
-  /* -------------------- GUARDAR ESTADO DE PAGINACIÓN (NUEVO) -------------------- */
+  // guardar p
   useEffect(() => {
     if (!category || category === "ALL") return;
     if (!Number.isFinite(page) || page < 1) return;
 
     writeLastState({
-      ctxKey: makeCtxKey(category, subcat, sort),
+      ctxKey,
       cat: category,
       subcat,
       sort,
       p: page,
       ts: Date.now(),
     });
-  }, [category, subcat, sort, page]);
+  }, [ctxKey, category, subcat, sort, page]);
 
-  /* -------------------- RESET cursores cuando cambia contexto -------------------- */
+  // reset si cambia contexto (cat/subcat/sort)
   useEffect(() => {
-    lastDocsRef.current = { 1: null };
-    updateParams({ p: 1 });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category, subcat, sort]);
+    if (prevCtxRef.current === null) {
+      prevCtxRef.current = ctxKey;
+      return;
+    }
 
-  /* -------------------- CARGA REAL CON CURSOR + CACHING -------------------- */
+    if (prevCtxRef.current !== ctxKey) {
+      prevCtxRef.current = ctxKey;
+      lastDocsRef.current = { 1: null };
+      updateParams({ p: 1 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctxKey]);
+
+  /* ==================== CARGA ====================
+     ✅ Avanza SOLO cuando la entrada al mount fue PUSH.
+     - page=1 + entryNavType==="PUSH" => usa cursor persistido + bypass cache
+     - si no => usa cache normal / no consume cursor
+  ================================================ */
   useEffect(() => {
     let alive = true;
 
     async function load() {
+      if (!category || category === "ALL") return;
+
       const cacheKey = makePageKey(category, subcat, sort, page);
 
-      // ✅ Si hay cache => pinta al instante y NO re-descarga
-      const cached = cacheGet(cacheKey);
-      if (cached) {
-        setError("");
-        setItems(cached.items ?? []);
-        setHasNext(Boolean(cached.hasNext));
-        setLoading(false);
+      const isPage1 = page === 1;
+      const shouldAdvance = entryNavType === "PUSH"; // ✅ SOLO PUSH real (congelado)
+      const bypassCache = isPage1 && shouldAdvance;
 
-        if (cached.lastDocByPage) {
-          lastDocsRef.current = cached.lastDocByPage;
+      // cache hit (cuando no forzamos avance)
+      if (!bypassCache) {
+        const cached = cacheGet(cacheKey);
+        if (cached) {
+          setError("");
+          setItems(cached.items ?? []);
+          setHasNext(Boolean(cached.hasNext));
+          setLoading(false);
+          if (cached.lastDocByPage) lastDocsRef.current = cached.lastDocByPage;
+          return;
         }
-        return;
       }
 
-      // Sin cache => comportamiento original
       setLoading(true);
       setError("");
-      setItems([]);
 
       try {
         const lastDoc = lastDocsRef.current[page] ?? null;
 
-        const res = await getProductsPageFirestore({
+        // Cursor persistido SOLO si queremos avanzar y estamos en p=1 y no hay snapshot
+        const savedLastDocId =
+          isPage1 && shouldAdvance && !lastDoc ? getLastDocIdForCtx(ctxKey) : null;
+
+        // 1) intento normal
+        let res = await getProductsPageFirestore({
           pageSize: PAGE_SIZE,
           category,
           subcategory: subcat,
           sort,
           queryText: "",
           lastDoc,
+          lastDocId: savedLastDocId,
         });
+
+        // 2) circular (solo si intentamos avanzar)
+        if (
+          isPage1 &&
+          shouldAdvance &&
+          savedLastDocId &&
+          (!res?.items || res.items.length === 0)
+        ) {
+          clearLastDocIdForCtx(ctxKey);
+          lastDocsRef.current = { 1: null };
+
+          res = await getProductsPageFirestore({
+            pageSize: PAGE_SIZE,
+            category,
+            subcategory: subcat,
+            sort,
+            queryText: "",
+            lastDoc: null,
+            lastDocId: null,
+          });
+        }
 
         if (!alive) return;
 
-        setItems(res?.items ?? []);
+        const nextItems = res?.items ?? [];
+        setItems(nextItems);
         setHasNext(Boolean(res?.hasNext));
 
-        // guarda cursor para la siguiente página
+        // snapshot next page
         lastDocsRef.current[page + 1] = res?.lastDoc ?? null;
 
-        // guardar en cache
-        cacheSet(cacheKey, {
-          ts: Date.now(),
-          items: res?.items ?? [],
-          hasNext: Boolean(res?.hasNext),
-          lastDocByPage: { ...lastDocsRef.current },
-        });
+        // persistir cursor SOLO si avanzamos (PUSH) y p=1
+        if (isPage1 && shouldAdvance && res?.lastDocId) {
+          setLastDocIdForCtx(ctxKey, res.lastDocId);
+        }
+
+        if (!bypassCache) {
+          cacheSet(cacheKey, {
+            ts: Date.now(),
+            items: nextItems,
+            hasNext: Boolean(res?.hasNext),
+            lastDocByPage: { ...lastDocsRef.current },
+          });
+        }
       } catch (e) {
         console.error(e);
         if (alive) setError(t("loadError"));
       } finally {
-        if (alive) {
-          setLoading(false);
-          window.scrollTo({ top: 0, behavior: "auto" });
-        }
+        if (!alive) return;
+        setLoading(false);
+        // no fuerces scroll al volver atrás
+        if (entryNavType !== "POP") window.scrollTo({ top: 0, behavior: "auto" });
       }
     }
 
@@ -266,9 +347,8 @@ export default function CategoryPage() {
     return () => {
       alive = false;
     };
-  }, [category, subcat, sort, page, t]);
+  }, [category, subcat, sort, page, t, ctxKey, entryNavType]);
 
-  /* -------------------- idioma -------------------- */
   const mappedItems = useMemo(() => {
     const lang = i18n.language;
     return items.map((p) => ({
@@ -288,28 +368,29 @@ export default function CategoryPage() {
     }));
   }, [items, i18n.language]);
 
-  /* -------------------- pagination -------------------- */
-  const paginationCount = hasNext ? page + 1 : page;
+  const paginationCount = useMemo(() => (hasNext ? page + 1 : page), [hasNext, page]);
 
-  const onPageChange = (_e, nextPage) => {
-    if (nextPage > page && !hasNext) return;
-    updateParams({ p: nextPage });
-  };
+  const onPageChange = useCallback(
+    (_e, nextPage) => {
+      if (nextPage > page && !hasNext) return;
+      updateParams({ p: nextPage });
+    },
+    [page, hasNext, updateParams]
+  );
 
-  /* -------------------- render -------------------- */
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
       <Header queryText={queryText} onQueryChange={setQueryText} />
 
       <Container maxWidth="lg" sx={{ px: { xs: 1, sm: 2 }, py: 3 }}>
-        {/* Hero */}
         <Paper
           elevation={0}
           sx={{
             p: 3,
             borderRadius: 4,
             mb: 2,
-            background: "linear-gradient(135deg, rgba(15,93,58,0.12), rgba(242,201,76,0.18))",
+            background:
+              "linear-gradient(135deg, rgba(15,93,58,0.12), rgba(242,201,76,0.18))",
           }}
         >
           <Typography variant="h5" sx={{ fontWeight: 900 }}>

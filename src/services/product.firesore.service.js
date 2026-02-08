@@ -66,36 +66,37 @@ function buildSort(sort) {
  *
  * ✅ subcategory
  */
+
+
 export async function getProductsPageFirestore({
   pageSize = 12,
   category = "ALL",
   subcategory = "ALL",
   sort = "newest",
   queryText = "",
-  lastDoc = null,
+  lastDoc = null,      // DocumentSnapshot (si ya lo tienes)
+  lastDocId = null,    // ✅ SOLO ID (persistible)
 }) {
-  
   const qText = normalizeQueryText(queryText);
   const { field, dir } = buildSort(sort);
 
   const colRef = collection(db, PRODUCTS_COL);
   const constraints = [];
 
-  if (category && category !== "ALL") {
-    constraints.push(where("Categoria", "==", category));
-  }
-
-  if (subcategory && subcategory !== "ALL") {
-    constraints.push(where("Subcategoria", "==", subcategory));
-  }
-
-  if (qText) {
-    constraints.push(where("searchKeywords", "array-contains", qText));
-  }
+  if (category && category !== "ALL") constraints.push(where("Categoria", "==", category));
+  if (subcategory && subcategory !== "ALL") constraints.push(where("Subcategoria", "==", subcategory));
+  if (qText) constraints.push(where("searchKeywords", "array-contains", qText));
 
   constraints.push(orderBy(field, dir));
 
-  if (lastDoc) constraints.push(startAfter(lastDoc));
+  // ✅ si me pasan id, recupero el snapshot
+  let effectiveLastDoc = lastDoc;
+  if (!effectiveLastDoc && lastDocId) {
+    const snap = await getDoc(doc(db, PRODUCTS_COL, lastDocId));
+    if (snap.exists()) effectiveLastDoc = snap;
+  }
+
+  if (effectiveLastDoc) constraints.push(startAfter(effectiveLastDoc));
 
   constraints.push(limit(pageSize + 1));
 
@@ -107,9 +108,15 @@ export async function getProductsPageFirestore({
 
   const slice = docs.slice(0, pageSize);
   const items = slice.map(mapDoc);
-  const nextLastDoc = slice.length ? slice[slice.length - 1] : lastDoc;
 
-  return { items, hasNext, lastDoc: nextLastDoc };
+  const nextLastDoc = slice.length ? slice[slice.length - 1] : effectiveLastDoc;
+
+  return {
+    items,
+    hasNext,
+    lastDoc: nextLastDoc,                 // snapshot para paginación normal
+    lastDocId: nextLastDoc ? nextLastDoc.id : lastDocId, // ✅ id para persistir
+  };
 }
 
 export async function getProductByIdFirestore(id) {
@@ -229,11 +236,12 @@ export async function updateViewCountFS(productId) {
   await updateDoc(ref, { Vistos: increment(1) });
 }
 
-export async function addInteraccionFS({ userId, categoria, productId, cantidad }) {
+export async function addInteraccionFS({ userId, subcategoria, productId, cantidad }) {
   if (!userId || !productId) return;
+  console.log('estamos on amigo',subcategoria)
   const ref = doc(db, PRODUCTS_COL, productId);
   await updateDoc(ref, { Interaccion: increment(cantidad) });
-  if (categoria) await actualizarCInteresFS(userId, categoria);
+  if (subcategoria) await actualizarCInteresFS(userId, subcategoria);
 }
 
 export async function getFavoriteRefFromProductFS({ userId, productId }) {
