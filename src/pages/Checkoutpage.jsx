@@ -32,6 +32,54 @@ function saveHasPurchasedForUser(uid, value) {
   }
 }
 
+/* ---------------------------------------------------------------- */
+/* ✅ BOTÓN FIXED ABAJO SOLO EN MÓVIL (NO DESKTOP)                    */
+/* ---------------------------------------------------------------- */
+function MobileFixedPayBar({ visible, total, onPay, disabled }) {
+  if (!visible) return null;
+
+  return (
+    <Box
+      sx={{
+        display: { xs: "block", md: "none" }, // ✅ SOLO móvil
+        position: "fixed",
+        left: 0,
+        right: 0,
+        bottom: 0,
+
+        bgcolor: "#fff",
+        zIndex: 20000,
+        borderTop: "1px solid",
+        borderColor: "divider",
+        boxShadow: "0 -10px 25px rgba(0,0,0,0.12)",
+
+        px: 1,
+        py: 1,
+        pb: "calc(env(safe-area-inset-bottom, 0px) + 10px)",
+      }}
+    >
+      <Box sx={{ maxWidth: 980, mx: "auto" }}>
+        <Stack spacing={1}>
+          <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+            <Typography sx={{ fontWeight: 900 }}>Total</Typography>
+            <Typography sx={{ fontWeight: 900 }}>XFA {puntodecimal(total)}</Typography>
+          </Box>
+
+          <Button
+            variant="contained"
+            fullWidth
+            sx={{ height: 46, fontWeight: 900 }}
+            onClick={onPay}
+            disabled={disabled}
+          >
+            Realizar Pago (Presencial o Electronico)
+          </Button>
+        </Stack>
+      </Box>
+    </Box>
+  );
+}
+
 export default function CheckoutPage() {
   const cart = useCart();
   const nav = useNavigate();
@@ -162,7 +210,22 @@ export default function CheckoutPage() {
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
       <Header queryText="" onQueryChange={() => {}} />
 
-      <Container maxWidth="lg" sx={{ py: 3 }}>
+      {/* ✅ SOLO móvil: botón de pagar fijo abajo */}
+      <MobileFixedPayBar
+        visible={itemsToPay.length > 0}
+        total={totals.finalTotal}
+        onPay={handlePay}
+        disabled={loading || itemsToPay.length === 0}
+      />
+
+      <Container
+        maxWidth="lg"
+        sx={{
+          py: 3,
+          // ✅ espacio SOLO en móvil para que el fixed no tape contenido
+          pb: { xs: 13, md: 3 },
+        }}
+      >
         <Paper elevation={0} sx={{ p: { xs: 2, md: 3 }, borderRadius: 3 }}>
           <Typography variant="h5" sx={{ fontWeight: 900 }}>
             Checkout
@@ -329,10 +392,14 @@ export default function CheckoutPage() {
                     Total: XFA {puntodecimal(totals.finalTotal)}
                   </Typography>
 
+                  {/* ✅ IMPORTANTE:
+                      - En móvil NO se muestra este botón (ya existe el fixed abajo)
+                      - En desktop sí se muestra aquí como siempre
+                  */}
                   <Button
                     variant="contained"
                     fullWidth
-                    sx={{ mt: 1 }}
+                    sx={{ mt: 1, display: { xs: "none", md: "block" } }} // ✅ SOLO desktop
                     onClick={handlePay}
                     disabled={loading || itemsToPay.length === 0}
                   >

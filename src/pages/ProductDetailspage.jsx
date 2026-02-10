@@ -128,7 +128,7 @@ function addRecentlyViewed(productId) {
 
 function shippingDuration(city, method) {
   if (method === "SEA") return { type: "MONTHS", months: 3 };
-  const days = city === "Bata" ? 20 : 15;
+  const days = city === "Bata" ? 25 : 19;
   return { type: "DAYS", days };
 }
 function formatDuration(d) {
@@ -367,6 +367,108 @@ function StickyPromoSMS({
           </Box>
         </Stack>
       </Paper>
+    </Box>
+  );
+}
+
+/* -------------------- ✅ Bottom Action Bar (móvil fixed, blanco, arriba de todo) -------------------- */
+function BottomActionBar({
+  cartSaving,
+  disableColorRequired,
+  comprarahora,
+  addToCart,
+  wishOn,
+  toggleFavoriteFS,
+  favBusy,
+  onShare,
+}) {
+  return (
+    <Box
+      sx={{
+        position: { xs: "fixed", sm: "static" },
+        left: { xs: 0, sm: "auto" },
+        right: { xs: 0, sm: "auto" },
+        bottom: { xs: 0, sm: "auto" },
+
+        // ✅ fondo blanco sólido en móvil
+        bgcolor: { xs: "#fff", sm: "transparent" },
+        opacity: 1,
+        backdropFilter: "none",
+
+        // ✅ por encima de TODO
+        zIndex: { xs: 20000, sm: "auto" },
+
+        // ✅ separación visual
+        borderTop: { xs: "1px solid", sm: "none" },
+        borderColor: { xs: "divider", sm: "transparent" },
+        boxShadow: { xs: "0 -10px 25px rgba(0,0,0,0.12)", sm: "none" },
+
+        // ✅ padding + safe area
+        px: { xs: 1, sm: 0 },
+        py: { xs: 1, sm: 0 },
+        pb: { xs: "calc(env(safe-area-inset-bottom, 0px) + 10px)", sm: 0 },
+      }}
+    >
+      <Box sx={{ maxWidth: 980, mx: "auto" }}>
+        <Stack
+          direction={{ xs: "row", sm: "row" }}
+          spacing={1}
+          sx={{
+            mt: { xs: 0, sm: 2 },
+            alignItems: "center",
+            "& .cta": { flex: { xs: 1, sm: "unset" } },
+            "& .iconBtn": { minWidth: 44, px: 1 },
+          }}
+        >
+          <Button
+            className="cta"
+            variant="contained"
+            onClick={comprarahora}
+            disabled={cartSaving || disableColorRequired}
+            sx={{ height: { xs: 44, sm: "auto" } }}
+          >
+            Comprar
+          </Button>
+
+          <Button
+            className="cta"
+            variant="outlined"
+            onClick={addToCart}
+            disabled={cartSaving || disableColorRequired}
+            sx={{ height: { xs: 44, sm: "auto" } }}
+          >
+            {cartSaving ? "Guardando..." : "Añadir al carrito"}
+          </Button>
+
+          <Button
+            className="iconBtn"
+            variant="text"
+            startIcon={
+              wishOn ? (
+                <FavoriteIcon sx={{ color: "error.main" }} />
+              ) : (
+                <FavoriteBorderIcon sx={{ color: "text.secondary" }} />
+              )
+            }
+            onClick={toggleFavoriteFS}
+            disabled={favBusy || cartSaving}
+            sx={{
+              color: wishOn ? "error.main" : "text.secondary",
+              fontWeight: 700,
+            }}
+          />
+
+          <Button
+            className="iconBtn"
+            variant="text"
+            startIcon={<ShareIcon />}
+            onClick={onShare}
+            disabled={cartSaving}
+          >
+            <Box sx={{ display: { xs: "none", sm: "inline" } }}>Compartir</Box>
+          </Button>
+        </Stack>
+      </Box>
     </Box>
   );
 }
@@ -870,7 +972,7 @@ export default function ProductDetailsPage() {
       qty,
       Detalles,
       link: url,
-      sub:subcategoria,
+      sub: subcategoria,
     };
 
     nav("/checkout", { state: { buyNowItem } });
@@ -923,7 +1025,7 @@ export default function ProductDetailsPage() {
         </Stack>
       </Backdrop>
 
-      {/* ✅ padding bottom para que el banner fijo no tape contenido */}
+      {/* ✅ padding bottom para que el bar fijo no tape contenido */}
       <Container
         maxWidth="lg"
         sx={{
@@ -1030,6 +1132,9 @@ export default function ProductDetailsPage() {
                   <Typography variant="h5" sx={{ fontWeight: 900 }}>
                     {mapped._title}
                   </Typography>
+                  <Typography variant="h5" sx={{ fontWeight: 900, marginTop: 2 }}>
+                    XFA {puntodecimal(mapped._finalPrice)}
+                  </Typography>
 
                   <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: "wrap" }}>
                     <Stack direction="row" spacing={0.5} alignItems="center">
@@ -1054,11 +1159,7 @@ export default function ProductDetailsPage() {
                         display: "-webkit-box",
                         WebkitBoxOrient: "vertical",
                         overflow: "hidden",
-                        ...(detailsExpanded
-                          ? {}
-                          : {
-                              WebkitLineClamp: 4,
-                            }),
+                        ...(detailsExpanded ? {} : { WebkitLineClamp: 4 }),
                       }}
                     >
                       {mapped._details}
@@ -1077,10 +1178,6 @@ export default function ProductDetailsPage() {
                   </Box>
 
                   <Divider sx={{ my: 2 }} />
-
-                  <Typography variant="h5" sx={{ fontWeight: 900 }}>
-                    XFA {puntodecimal(mapped._finalPrice)}
-                  </Typography>
 
                   {/* Color */}
                   {colors.length > 0 && (
@@ -1208,51 +1305,17 @@ export default function ProductDetailsPage() {
                     (informativo)
                   </Typography>
 
-                  {/* Botones */}
-                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mt: 2 }}>
-                    <Button
-                      variant="contained"
-                      onClick={comprarahora}
-                      disabled={cartSaving || disableColorRequired}
-                    >
-                      Comprar ahora
-                    </Button>
-
-                    <Button
-                      variant="outlined"
-                      onClick={addToCart}
-                      disabled={cartSaving || disableColorRequired}
-                    >
-                      {cartSaving ? "Guardando..." : "Añadir al carrito"}
-                    </Button>
-
-                    <Button
-                      variant="text"
-                      startIcon={
-                        wishOn ? (
-                          <FavoriteIcon sx={{ color: "error.main" }} />
-                        ) : (
-                          <FavoriteBorderIcon sx={{ color: "text.secondary" }} />
-                        )
-                      }
-                      onClick={toggleFavoriteFS}
-                      disabled={favBusy || cartSaving}
-                      sx={{
-                        color: wishOn ? "error.main" : "text.secondary",
-                        fontWeight: 700,
-                        minWidth: 44,
-                      }}
-                    />
-
-                    <Button
-                      variant="text"
-                      startIcon={<ShareIcon />}
-                      onClick={onShare}
-                      disabled={cartSaving}
-                    >
-                      Compartir
-                    </Button>
-                  </Stack>
+                  {/* ✅ Botones: desktop normal / móvil fixed blanco arriba de todo */}
+                  <BottomActionBar
+                    cartSaving={cartSaving}
+                    disableColorRequired={disableColorRequired}
+                    comprarahora={comprarahora}
+                    addToCart={addToCart}
+                    wishOn={wishOn}
+                    toggleFavoriteFS={toggleFavoriteFS}
+                    favBusy={favBusy}
+                    onShare={onShare}
+                  />
 
                   <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
                     <Chip icon={<VerifiedUserIcon />} label="Compra protegida" />

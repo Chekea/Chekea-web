@@ -25,16 +25,21 @@ export default function CartPage() {
   const cart = useCart();
   const nav = useNavigate();
 
+  const [page, setPage] = useState(1);
+
+  // -------- Derived state (minimize repeated lookups) --------
+  const itemsLen = cart.items?.length ?? 0;
+  const selectedCount = cart.selectedCount;
+
   const totalAll = useMemo(() => Number(cart.total().toFixed(2)), [cart]);
   const totalSelected = useMemo(() => Number(cart.selectedTotal().toFixed(2)), [cart]);
 
-  const allSelected = cart.items.length > 0 && cart.selectedCount === cart.items.length;
+  const allSelected = useMemo(
+    () => itemsLen > 0 && selectedCount === itemsLen,
+    [itemsLen, selectedCount]
+  );
 
-  const [page, setPage] = useState(1);
-
-  const pageCount = useMemo(() => {
-    return Math.max(1, Math.ceil((cart.items?.length ?? 0) / PAGE_SIZE));
-  }, [cart.items?.length]);
+  const pageCount = useMemo(() => Math.max(1, Math.ceil(itemsLen / PAGE_SIZE)), [itemsLen]);
 
   useEffect(() => {
     if (page > pageCount) setPage(pageCount);
@@ -45,10 +50,9 @@ export default function CartPage() {
     return cart.items.slice(start, start + PAGE_SIZE);
   }, [cart.items, page]);
 
+  // -------- Handlers (stable) --------
   const goCheckout = useCallback(() => {
-    const ids = Array.from(cart.selectedIds);
-    console.log(ids)
-    nav("/checkout", { state: { selectedIds: ids } });
+    nav("/checkout", { state: { selectedIds: Array.from(cart.selectedIds) } });
   }, [cart.selectedIds, nav]);
 
   const onPageChange = useCallback((_e, nextPage) => {
@@ -56,11 +60,25 @@ export default function CartPage() {
     window.scrollTo({ top: 0, behavior: "auto" });
   }, []);
 
+  const toggleAll = useCallback(() => {
+    if (allSelected) cart.clearSelection();
+    else cart.selectAll();
+  }, [allSelected, cart]);
+
+  const showMobileFixedCTA = cart.ready && itemsLen > 0; // siempre visible en móvil (aunque deshabilitado si 0)
+
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
       <Header queryText="" onQueryChange={() => {}} />
 
-      <Container maxWidth="lg" sx={{ py: { xs: 2, md: 3 } }}>
+      <Container
+        maxWidth="lg"
+        sx={{
+          py: { xs: 2, md: 3 },
+          // ✅ espacio para que el botón fijo no tape la paginación / último item
+          pb: { xs: showMobileFixedCTA ? 10 : 3, md: 3 },
+        }}
+      >
         {/* Header row responsive */}
         <Stack
           direction={{ xs: "column", sm: "row" }}
@@ -75,9 +93,9 @@ export default function CartPage() {
             Mi caja
           </Typography>
 
-          {cart.items.length > 0 && (
+          {itemsLen > 0 && (
             <Chip
-              label={`Seleccionados: ${cart.selectedCount}/${cart.items.length}`}
+              label={`Seleccionados: ${selectedCount}/${itemsLen}`}
               variant="outlined"
               sx={{ width: { xs: "fit-content", sm: "auto" } }}
             />
@@ -88,7 +106,7 @@ export default function CartPage() {
           <Paper elevation={0} sx={{ p: 3, borderRadius: 3 }}>
             <Typography sx={{ color: "text.secondary" }}>Cargando tu caja…</Typography>
           </Paper>
-        ) : cart.items.length === 0 ? (
+        ) : itemsLen === 0 ? (
           <Paper elevation={0} sx={{ p: 3, borderRadius: 3 }}>
             <Typography sx={{ color: "text.secondary" }}>Tu caja está vacía.</Typography>
             <Button sx={{ mt: 2 }} variant="contained" onClick={() => nav("/")}>
@@ -112,15 +130,19 @@ export default function CartPage() {
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                     <Checkbox
                       checked={allSelected}
-                      indeterminate={!allSelected && cart.selectedCount > 0}
-                      onChange={() => (allSelected ? cart.clearSelection() : cart.selectAll())}
+                      indeterminate={!allSelected && selectedCount > 0}
+                      onChange={toggleAll}
                     />
                     <Typography sx={{ fontWeight: 800 }}>
                       {allSelected ? "Todo seleccionado" : "Seleccionar productos"}
                     </Typography>
                   </Box>
 
-                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ flexWrap: "wrap" }}>
+                  <Stack
+                    direction={{ xs: "column", sm: "row" }}
+                    spacing={1}
+                    sx={{ flexWrap: "wrap" }}
+                  >
                     <Button size="small" onClick={cart.selectAll}>
                       Seleccionar todo
                     </Button>
@@ -173,6 +195,7 @@ export default function CartPage() {
                           src={p.Img}
                           alt={p.Titulo}
                           style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          loading="lazy"
                         />
                       </Box>
 
@@ -189,20 +212,12 @@ export default function CartPage() {
                           (Envío) {puntodecimal(p.Envio)}
                         </Typography>
 
-                        {/* ✅ Cantidad solo lectura */}
                         <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.25 }}>
                           Cantidad: <b>{p.qty ?? 1}</b>
                         </Typography>
 
                         {p.Detalles ? (
-                          <Typography
-                            variant="body2"
-                            sx={{
-                              color: "text.secondary",
-                              display: { xs: "block", sm: "block" },
-                              mt: 0.5,
-                            }}
-                          >
+                          <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5 }}>
                             {p.Detalles}
                           </Typography>
                         ) : null}
@@ -247,7 +262,7 @@ export default function CartPage() {
 
               <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
                 <Typography sx={{ color: "text.secondary" }}>Seleccionados</Typography>
-                <Typography sx={{ fontWeight: 900 }}>{cart.selectedCount}</Typography>
+                <Typography sx={{ fontWeight: 900 }}>{selectedCount}</Typography>
               </Box>
 
               <Box sx={{ display: "flex", justifyContent: "space-between", mb: 1.5 }}>
@@ -255,11 +270,13 @@ export default function CartPage() {
                 <Typography sx={{ fontWeight: 900 }}>XFA {puntodecimal(totalSelected)}</Typography>
               </Box>
 
+              {/* ✅ este botón solo desktop; en móvil será fijo abajo */}
               <Button
                 variant="contained"
                 fullWidth
-                disabled={cart.selectedCount === 0}
+                disabled={selectedCount === 0}
                 onClick={goCheckout}
+                sx={{ display: { xs: "none", md: "flex" } }}
               >
                 Ir a pagar seleccionados
               </Button>
@@ -271,7 +288,7 @@ export default function CartPage() {
                 <Typography sx={{ fontWeight: 700 }}>XFA {puntodecimal(totalAll)}</Typography>
               </Box>
 
-              {cart.selectedCount === 0 ? (
+              {selectedCount === 0 ? (
                 <Typography sx={{ mt: 1, color: "text.secondary" }} variant="body2">
                   Selecciona al menos un producto para pagar.
                 </Typography>
@@ -280,6 +297,38 @@ export default function CartPage() {
           </Box>
         )}
       </Container>
+
+      {/* ✅ MISMO BOTÓN, FIXED ABAJO SOLO EN MÓVIL (sin extras) */}
+      {showMobileFixedCTA ? (
+        <Box
+          sx={{
+            display: { xs: "block", md: "none" },
+            position: "fixed",
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 1200,
+            bgcolor: "background.paper",
+            borderTop: "1px solid",
+            borderColor: "divider",
+            boxShadow: "0 -8px 24px rgba(0,0,0,0.08)",
+            pb: "env(safe-area-inset-bottom)", // iOS safe area
+          }}
+        >
+          <Container maxWidth="lg" sx={{ py: 1.25 }}>
+            <Button
+              variant="contained"
+              fullWidth
+              size="large"
+              disabled={selectedCount === 0}
+              onClick={goCheckout}
+              sx={{ fontWeight: 900, borderRadius: 2 }}
+            >
+              Ir a pagar seleccionados
+            </Button>
+          </Container>
+        </Box>
+      ) : null}
     </Box>
   );
 }
