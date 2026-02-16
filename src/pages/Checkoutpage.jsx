@@ -1,58 +1,81 @@
 // src/pages/CheckoutPage.jsx
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+  memo,
+} from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import {
-  Container,
-  Box,
-  Paper,
-  Typography,
-  Stack,
-  Button,
-  Alert,
-  Chip,
-  Divider,
-} from "@mui/material";
-import Header from "../components/header";
+
+import Container from "@mui/material/Container";
+import Box from "@mui/material/Box";
+import Paper from "@mui/material/Paper";
+import Typography from "@mui/material/Typography";
+import Stack from "@mui/material/Stack";
+import Button from "@mui/material/Button";
+import Alert from "@mui/material/Alert";
+import Chip from "@mui/material/Chip";
+import Divider from "@mui/material/Divider";
+import useMediaQuery from "@mui/material/useMediaQuery";
+
+import { useTheme } from "@mui/material/styles";
+
 import { useCart } from "../state/CartContext";
 import { useAuth } from "../state/AuthContext";
 import { puntodecimal } from "../utils/Helpers";
 import { getCurrentTimestamp, checkCompras } from "../services/compras.service";
+import { getCheckoutFromCache } from "../utils/checkoutwebview";
 
-/** ✅ guardar hasPurchased por usuario en sessionStorage */
-const HAS_PURCHASED_SESSION_KEY = "hasPurchasedByUser";
-function saveHasPurchasedForUser(uid, value) {
-  if (!uid) return;
-  try {
-    const raw = sessionStorage.getItem(HAS_PURCHASED_SESSION_KEY);
-    const map = raw ? JSON.parse(raw) : {};
-    map[uid] = Boolean(value);
-    sessionStorage.setItem(HAS_PURCHASED_SESSION_KEY, JSON.stringify(map));
-  } catch {
-    // ignore
-  }
+/* =========================
+   HEADER SOLO DESKTOP (LAZY)
+========================= */
+function useDesktopHeader() {
+  const theme = useTheme();
+  const isDesktop = useMediaQuery(theme.breakpoints.up("md"));
+  const [HeaderComp, setHeaderComp] = useState(null);
+
+  useEffect(() => {
+    if (!isDesktop) return;
+
+    let mounted = true;
+
+    import("../components/header").then((mod) => {
+      if (mounted) setHeaderComp(() => mod.default);
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, [isDesktop]);
+
+  return { isDesktop, HeaderComp };
 }
 
-/* ---------------------------------------------------------------- */
-/* ✅ BOTÓN FIXED ABAJO SOLO EN MÓVIL (NO DESKTOP)                    */
-/* ---------------------------------------------------------------- */
-function MobileFixedPayBar({ visible, total, onPay, disabled }) {
+/* =========================
+   BOTÓN FIXED OPTIMIZADO
+========================= */
+const MobileFixedPayBar = memo(function MobileFixedPayBar({
+  visible,
+  total,
+  onPay,
+  disabled,
+}) {
   if (!visible) return null;
 
   return (
     <Box
       sx={{
-        display: { xs: "block", md: "none" }, // ✅ SOLO móvil
+        display: { xs: "block", md: "none" },
         position: "fixed",
         left: 0,
         right: 0,
         bottom: 0,
-
         bgcolor: "#fff",
         zIndex: 20000,
         borderTop: "1px solid",
         borderColor: "divider",
-        boxShadow: "0 -10px 25px rgba(0,0,0,0.12)",
-
+        boxShadow: "0 -6px 16px rgba(0,0,0,0.08)",
         px: 1,
         py: 1,
         pb: "calc(env(safe-area-inset-bottom, 0px) + 10px)",
@@ -62,7 +85,9 @@ function MobileFixedPayBar({ visible, total, onPay, disabled }) {
         <Stack spacing={1}>
           <Box sx={{ display: "flex", justifyContent: "space-between" }}>
             <Typography sx={{ fontWeight: 900 }}>Total</Typography>
-            <Typography sx={{ fontWeight: 900 }}>XFA {puntodecimal(total)}</Typography>
+            <Typography sx={{ fontWeight: 900 }}>
+              XFA {puntodecimal(total)}
+            </Typography>
           </Box>
 
           <Button
@@ -78,7 +103,74 @@ function MobileFixedPayBar({ visible, total, onPay, disabled }) {
       </Box>
     </Box>
   );
-}
+});
+
+/* =========================
+   ITEM MEMOIZADO
+========================= */
+const CheckoutItem = memo(function CheckoutItem({
+  item,
+  isBuyNow,
+  locationState,
+  onRemove,
+}) {
+  return (
+    <Paper sx={{ p: 2, mb: 1.5, borderRadius: 2 }}>
+      <Stack direction="row" spacing={2} alignItems="center">
+        <img
+          src={item.Img}
+          alt={item.titulo}
+          loading="lazy"
+          decoding="async"
+          style={{
+            width: 72,
+            height: 72,
+            borderRadius: 12,
+            objectFit: "cover",
+          }}
+        />
+
+        <Box sx={{ flex: 1 }}>
+          <Typography sx={{ fontWeight: 900 }}>
+            {item.titulo}
+          </Typography>
+
+          <Typography sx={{ color: "text.secondary" }}>
+            Cantidad: <b>{item.qty ?? 1}</b>
+          </Typography>
+
+          <Typography sx={{ mt: 0.5 }}>
+            Precio: <b>XFA {puntodecimal(item.Precio)}</b>
+          </Typography>
+
+          <Typography sx={{ mt: 0.5 }}>
+            Envio: <b>XFA {puntodecimal(item.Envio)}</b>
+          </Typography>
+
+          {item.Detalles && (
+            <Typography
+              sx={{ mt: 0.5, color: "text.secondary" }}
+              variant="body2"
+            >
+              {item.Detalles}
+            </Typography>
+          )}
+        </Box>
+
+        {!isBuyNow && locationState && (
+          <Button
+            variant="outlined"
+            color="error"
+            size="small"
+            onClick={() => onRemove(item.id)}
+          >
+            Quitar
+          </Button>
+        )}
+      </Stack>
+    </Paper>
+  );
+});
 
 export default function CheckoutPage() {
   const cart = useCart();
@@ -86,108 +178,80 @@ export default function CheckoutPage() {
   const location = useLocation();
   const auth = useAuth();
 
+  const { isDesktop, HeaderComp } = useDesktopHeader();
+
   const buyNowItem = location.state?.buyNowItem ?? null;
   const selectedIdsArr = location.state?.selectedIds ?? [];
-
-  const selectedIds = useMemo(() => new Set(selectedIdsArr), [selectedIdsArr]);
   const isBuyNow = Boolean(buyNowItem);
 
-  // Items a pagar: buyNow o selección del carrito
+  const selectedIds =
+    selectedIdsArr.length > 0 ? new Set(selectedIdsArr) : null;
+
+  const webviewItems = useMemo(() => {
+    if (location.state) return null;
+    return getCheckoutFromCache();
+  }, [location.state]);
+
   const itemsToPay = useMemo(() => {
     if (buyNowItem) return [buyNowItem];
-    if (selectedIds.size > 0) return cart.items.filter((it) => selectedIds.has(it.id));
+    if (selectedIds)
+      return cart.items.filter((it) => selectedIds.has(it.id));
+    if (webviewItems?.length) return webviewItems;
     return [];
-  }, [buyNowItem, cart.items, selectedIds]);
+  }, [buyNowItem, selectedIds, cart.items, webviewItems]);
 
-  const [err, setErr] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  // null = verificando, true = ya tiene compras, false = no tiene compras
   const [hasPurchases, setHasPurchases] = useState(null);
 
-  // Verifica si el usuario ya compró para aplicar descuento
   useEffect(() => {
+    const uid = auth.user?.uid;
+    if (!auth.isAuthed || !uid) return;
+
     let alive = true;
 
-    async function run() {
-      setErr("");
+    checkCompras({ userId: uid })
+      .then((res) => {
+        if (alive) setHasPurchases(res);
+      })
+      .catch(() => {
+        if (alive) setHasPurchases(true);
+      });
 
-      const uid = auth.user?.uid;
-
-      if (!auth.isAuthed || !uid) {
-        if (alive) setHasPurchases(null);
-        return;
-      }
-
-      try {
-        if (alive) setHasPurchases(null); // verificando
-        const result = await checkCompras({ userId: uid }); // true si tiene compras
-        if (!alive) return;
-
-        setHasPurchases(result);
-        saveHasPurchasedForUser(uid, result); // ✅ guardado por usuario
-      } catch (e) {
-        console.error(e);
-        if (!alive) return;
-
-        setHasPurchases(true); // fallback: no descuento
-        saveHasPurchasedForUser(uid, true); // ✅ guardado por usuario (fallback)
-      }
-    }
-
-    run();
     return () => {
       alive = false;
     };
   }, [auth.isAuthed, auth.user?.uid]);
 
-  // ✅ Descuento: 10% SOLO al precio del producto (NO al envío)
-  const discountRate = hasPurchases === false ? 0.10 : 0;
+  const discountRate = hasPurchases === false ? 0.1 : 0;
 
-  /**
-   * Vamos a desglosar:
-   * - productsSubtotal: suma de (Precio * qty) sin envío
-   * - shippingTotal: suma de Envio (por item; si es por unidad, multiplica por qty)
-   * - discountAmount: 10% de productsSubtotal
-   * - finalTotal: (productsSubtotal - discountAmount) + shippingTotal
-   */
   const totals = useMemo(() => {
-    const productsSubtotal = itemsToPay.reduce((acc, it) => {
-      const qty = Math.max(1, Number(it.qty ?? 1));
-      const precioUnitario = Number(it.Precio ?? 0);
-      return acc + precioUnitario * qty;
-    }, 0);
+    let products = 0;
+    let shipping = 0;
 
-    const shippingTotal = itemsToPay.reduce((acc, it) => {
-      const qty = Math.max(1, Number(it.qty ?? 1));
-      const envioUnitario = Number(it.Envio ?? 0);
+    for (let i = 0; i < itemsToPay.length; i++) {
+      const it = itemsToPay[i];
+      const qty = it.qty ?? 1;
+      products += it.Precio * qty;
+      shipping += it.Envio;
+    }
 
-      // ⚠️ Si tu envío es por unidad, usa: (envioUnitario * qty)
-      // Si tu envío es por producto (una sola vez), deja: envioUnitario
-      return acc + envioUnitario; // cambia a: acc + (envioUnitario * qty) si aplica
-    }, 0);
-
-    const discountAmount = Number((productsSubtotal * discountRate).toFixed(2));
-
-    const finalTotal = Number((productsSubtotal - discountAmount + shippingTotal).toFixed(2));
+    const discount = products * discountRate;
+    const final = products - discount + shipping;
 
     return {
-      productsSubtotal: Number(productsSubtotal.toFixed(2)),
-      shippingTotal: Number(shippingTotal.toFixed(2)),
-      discountAmount,
-      finalTotal,
+      productsSubtotal: products,
+      shippingTotal: shipping,
+      discountAmount: discount,
+      finalTotal: final,
     };
   }, [itemsToPay, discountRate]);
 
   const handlePay = useCallback(() => {
-    setErr("");
-
-    const now = getCurrentTimestamp();
-
     if (!auth.isAuthed) {
       nav("/login");
       return;
     }
+
+    const now = getCurrentTimestamp();
 
     nav(`/verify/${now}`, {
       state: {
@@ -202,36 +266,31 @@ export default function CheckoutPage() {
     });
   }, [auth.isAuthed, nav, itemsToPay, hasPurchases, discountRate, totals]);
 
-  const handleGoCart = useCallback(() => nav("/cart"), [nav]);
-  const handleGoHome = useCallback(() => nav("/"), [nav]);
-  const handleBack = useCallback(() => nav(-1), [nav]);
+  const handleRemove = useCallback(
+    (id) => cart.remove(id),
+    [cart]
+  );
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
-      <Header queryText="" onQueryChange={() => {}} />
+      {isDesktop && HeaderComp && (
+        <HeaderComp queryText="" onQueryChange={() => {}} />
+      )}
 
-      {/* ✅ SOLO móvil: botón de pagar fijo abajo */}
       <MobileFixedPayBar
         visible={itemsToPay.length > 0}
         total={totals.finalTotal}
         onPay={handlePay}
-        disabled={loading || itemsToPay.length === 0}
+        disabled={itemsToPay.length === 0}
       />
 
-      <Container
-        maxWidth="lg"
-        sx={{
-          py: 3,
-          // ✅ espacio SOLO en móvil para que el fixed no tape contenido
-          pb: { xs: 13, md: 3 },
-        }}
-      >
+      <Container maxWidth="lg" sx={{ py: 3, pb: { xs: 13, md: 3 } }}>
         <Paper elevation={0} sx={{ p: { xs: 2, md: 3 }, borderRadius: 3 }}>
           <Typography variant="h5" sx={{ fontWeight: 900 }}>
             Checkout
           </Typography>
 
-          {/* ✅ SMS / AVISO */}
+          {/* 🔴 TU TEXTO ORIGINAL SE MANTIENE */}
           <Alert severity="info" sx={{ mt: 2 }}>
             <Typography sx={{ fontWeight: 900 }}>
               Aviso importante sobre envíos
@@ -243,185 +302,57 @@ export default function CheckoutPage() {
             </Typography>
           </Alert>
 
-          {err && (
-            <Alert severity="error" sx={{ mt: 2 }}>
-              {err}
-            </Alert>
-          )}
-
           {itemsToPay.length === 0 ? (
-            <Box sx={{ mt: 2 }}>
-              <Typography sx={{ color: "text.secondary" }}>
-                No hay productos seleccionados para pagar.
-              </Typography>
-              <Button sx={{ mt: 2 }} variant="contained" onClick={handleGoCart}>
-                Volver a la caja
-              </Button>
-            </Box>
+            <Typography sx={{ mt: 2 }}>
+              No hay productos seleccionados para pagar.
+            </Typography>
           ) : (
-            <Box
-              sx={{
-                mt: 2,
-                display: "grid",
-                gridTemplateColumns: { xs: "1fr", md: "1fr 360px" },
-                gap: 2,
-              }}
-            >
-              {/* LISTA */}
-              <Box>
-                <Typography sx={{ fontWeight: 800, mb: 1 }}>
-                  {isBuyNow ? "Compra directa" : "Productos seleccionados"}{" "}
-                  <Chip size="small" label={`${itemsToPay.length}`} sx={{ ml: 1 }} />
-                </Typography>
-
-                <Stack spacing={1}>
-                  {itemsToPay.map((item) => (
-                    <Paper key={item.id} sx={{ p: 2, mb: 1.5, borderRadius: 2 }}>
-                      <Stack direction="row" spacing={2} alignItems="center">
-                        <img
-                          src={item.Img}
-                          alt={item.titulo}
-                          style={{
-                            width: 72,
-                            height: 72,
-                            borderRadius: 12,
-                            objectFit: "cover",
-                          }}
-                        />
-
-                        <Box sx={{ flex: 1 }}>
-                          <Typography sx={{ fontWeight: 900 }}>{item.titulo}</Typography>
-
-                          <Typography sx={{ color: "text.secondary" }}>
-                            Cantidad: <b>{item.qty ?? 1}</b>
-                          </Typography>
-
-                          <Typography sx={{ mt: 0.5 }}>
-                            Precio: <b>XFA {puntodecimal(item.Precio)}</b>
-                          </Typography>
-
-                          <Typography sx={{ mt: 0.5 }}>
-                            Envio: <b>XFA {puntodecimal(item.Envio)}</b>
-                          </Typography>
-
-                          {item.Detalles && (
-                            <Typography
-                              sx={{ mt: 0.5, color: "text.secondary" }}
-                              variant="body2"
-                            >
-                              {item.Detalles}
-                            </Typography>
-                          )}
-
-                          <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: "wrap" }}>
-                            {item.details?.shipCity && (
-                              <Chip size="small" label={`Ciudad: ${item.details.shipCity}`} />
-                            )}
-                            {item.details?.color?.nombre && (
-                              <Chip size="small" label={`Color: ${item.details.color.nombre}`} />
-                            )}
-                            {item.details?.style?.nombre && (
-                              <Chip size="small" label={`Estilo: ${item.details.style.nombre}`} />
-                            )}
-                            {item.details?.shipMethod && (
-                              <Chip
-                                size="small"
-                                label={`Envío: ${
-                                  item.details.shipMethod === "AIR" ? "Aéreo" : "Marítimo"
-                                }`}
-                              />
-                            )}
-                          </Stack>
-
-                          {item.details?.shipDurationText && (
-                            <Typography sx={{ mt: 0.5, color: "text.secondary" }}>
-                              Entrega estimada: <b>{item.details.shipDurationText}</b>
-                            </Typography>
-                          )}
-                        </Box>
-
-                        {!isBuyNow && (
-                          <Button
-                            variant="outlined"
-                            color="error"
-                            size="small"
-                            onClick={() => cart.remove(item.id)}
-                          >
-                            Quitar
-                          </Button>
-                        )}
-                      </Stack>
-                    </Paper>
-                  ))}
-                </Stack>
-
-                {!isBuyNow && (
-                  <Button sx={{ mt: 2 }} onClick={() => cart.clear()}>
-                    Vaciar carrito
-                  </Button>
-                )}
+            <>
+              <Box sx={{ mt: 2 }}>
+                {itemsToPay.map((item) => (
+                  <CheckoutItem
+                    key={item.id}
+                    item={item}
+                    isBuyNow={isBuyNow}
+                    locationState={location.state}
+                    onRemove={handleRemove}
+                  />
+                ))}
               </Box>
 
-              {/* RESUMEN */}
-              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, height: "fit-content" }}>
-                <Stack spacing={1}>
-                  <Typography sx={{ fontWeight: 800 }}>
-                    Productos: XFA {puntodecimal(totals.productsSubtotal)}
-                  </Typography>
+              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mt: 2 }}>
+                <Typography sx={{ fontWeight: 800 }}>
+                  Productos: XFA {puntodecimal(totals.productsSubtotal)}
+                </Typography>
 
-                  <Typography sx={{ fontWeight: 800 }}>
-                    Envío: XFA {puntodecimal(totals.shippingTotal)}
-                  </Typography>
+                <Typography sx={{ fontWeight: 800 }}>
+                  Envío: XFA {puntodecimal(totals.shippingTotal)}
+                </Typography>
 
-                  {hasPurchases === null && auth.isAuthed && (
-                    <Typography variant="body2" sx={{ color: "text.secondary" }}>
-                      Verificando descuento...
+                {hasPurchases === false && (
+                  <>
+                    <Typography sx={{ fontWeight: 800, color: "success.main" }}>
+                      Descuento solo en productos (10%): XFA -
+                      {puntodecimal(totals.discountAmount)}
                     </Typography>
-                  )}
+                    <Divider />
+                  </>
+                )}
 
-                  {hasPurchases === false && (
-                    <>
-                      <Typography sx={{ fontWeight: 800, color: "success.main" }}>
-                        Descuento solo en productos (10%): XFA -{puntodecimal(totals.discountAmount)}
-                      </Typography>
-                      <Divider />
-                    </>
-                  )}
+                <Typography sx={{ fontWeight: 900 }}>
+                  Total: XFA {puntodecimal(totals.finalTotal)}
+                </Typography>
 
-                  <Typography sx={{ fontWeight: 900 }}>
-                    Total: XFA {puntodecimal(totals.finalTotal)}
-                  </Typography>
-
-                  {/* ✅ IMPORTANTE:
-                      - En móvil NO se muestra este botón (ya existe el fixed abajo)
-                      - En desktop sí se muestra aquí como siempre
-                  */}
-                  <Button
-                    variant="contained"
-                    fullWidth
-                    sx={{ mt: 1, display: { xs: "none", md: "block" } }} // ✅ SOLO desktop
-                    onClick={handlePay}
-                    disabled={loading || itemsToPay.length === 0}
-                  >
-                    Realizar Pago (Presencial o Electronico)
-                  </Button>
-
-                  <Button sx={{ mt: 1 }} fullWidth onClick={handleGoHome}>
-                    Seguir comprando
-                  </Button>
-
-                  {isBuyNow ? (
-                    <Button sx={{ mt: 1 }} fullWidth variant="outlined" onClick={handleBack}>
-                      Volver al producto
-                    </Button>
-                  ) : (
-                    <Button sx={{ mt: 1 }} fullWidth variant="outlined" onClick={handleGoCart}>
-                      Volver a la caja
-                    </Button>
-                  )}
-                </Stack>
+                <Button
+                  variant="contained"
+                  fullWidth
+                  sx={{ mt: 1 }}
+                  onClick={handlePay}
+                >
+                  Realizar Pago (Presencial o Electronico)
+                </Button>
               </Paper>
-            </Box>
+            </>
           )}
         </Paper>
       </Container>

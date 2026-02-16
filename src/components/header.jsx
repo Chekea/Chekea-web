@@ -1,30 +1,18 @@
-import React, { useCallback, useMemo, useState } from "react";
-import {
-  AppBar,
-  Toolbar,
-  Typography,
-  Box,
-  Container,
-  TextField,
-  InputAdornment,
-  IconButton,
-  Tooltip,
-  Drawer,
-  List,
-  ListItemButton,
-  ListItemIcon,
-  ListItemText,
-  Divider,
-  useMediaQuery,
-} from "@mui/material";
-import { useTheme } from "@mui/material/styles";
+import React, { useCallback, useMemo } from "react";
+import AppBar from "@mui/material/AppBar";
+import Toolbar from "@mui/material/Toolbar";
+import Typography from "@mui/material/Typography";
+import Box from "@mui/material/Box";
+import Container from "@mui/material/Container";
+import TextField from "@mui/material/TextField";
+import InputAdornment from "@mui/material/InputAdornment";
+import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
 
 import SearchIcon from "@mui/icons-material/Search";
-import MenuIcon from "@mui/icons-material/Menu";
 import SupportAgentIcon from "@mui/icons-material/SupportAgent";
 import PersonOutlineIcon from "@mui/icons-material/PersonOutline";
 import ShoppingCartOutlinedIcon from "@mui/icons-material/ShoppingCartOutlined";
-import HomeOutlinedIcon from "@mui/icons-material/HomeOutlined";
 
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -35,31 +23,20 @@ export default function Header({ queryText = "", onQueryChange = () => {} }) {
   const nav = useNavigate();
   const auth = useAuth();
 
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
-  const [open, setOpen] = useState(false);
-
-  const accountPath = useMemo(() => (auth.isAuthed ? "/account" : "/login"), [auth.isAuthed]);
-
-  const go = useCallback(
-    (path) => {
-      nav(path);
-      setOpen(false);
-    },
-    [nav]
+  const accountPath = useMemo(
+    () => (auth.isAuthed ? "/account" : "/login"),
+    [auth.isAuthed]
   );
 
   const goSearch = useCallback(() => {
     const q = (queryText || "").trim();
     nav(q ? `/search?q=${encodeURIComponent(q)}` : `/search`);
-    setOpen(false);
   }, [nav, queryText]);
 
   const openWhatsApp = useCallback(() => {
     const phone = "222237169";
     const message = "Hola, necesito ayuda con mi pedido";
     const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-    setOpen(false);
     window.open(url, "_blank", "noopener,noreferrer");
   }, []);
 
@@ -70,13 +47,6 @@ export default function Header({ queryText = "", onQueryChange = () => {} }) {
           maxWidth="lg"
           sx={{ display: "flex", gap: 1.5, alignItems: "center", py: 0.5 }}
         >
-          {/* Mobile: menú */}
-          {isMobile && (
-            <IconButton color="inherit" onClick={() => setOpen(true)} aria-label="Abrir menú">
-              <MenuIcon />
-            </IconButton>
-          )}
-
           {/* Logo */}
           <Typography
             variant="h5"
@@ -84,7 +54,7 @@ export default function Header({ queryText = "", onQueryChange = () => {} }) {
             sx={{
               fontWeight: 900,
               letterSpacing: 0.2,
-              fontSize: { xs: 18, sm: 22, md: 24 },
+              fontSize: 24,
               whiteSpace: "nowrap",
               cursor: "pointer",
               userSelect: "none",
@@ -128,88 +98,28 @@ export default function Header({ queryText = "", onQueryChange = () => {} }) {
             />
           </Box>
 
-          {/* Desktop: íconos */}
-          {!isMobile && (
-            <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
-              <Tooltip title="Carrito">
-                <IconButton color="inherit" onClick={() => nav("/cart")} aria-label="Carrito">
-                  <ShoppingCartOutlinedIcon />
-                </IconButton>
-              </Tooltip>
+          {/* Íconos */}
+          <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
+            <Tooltip title="Carrito">
+              <IconButton color="inherit" onClick={() => nav("/cart")} aria-label="Carrito">
+                <ShoppingCartOutlinedIcon />
+              </IconButton>
+            </Tooltip>
 
-              <Tooltip title={auth.isAuthed ? "Mi cuenta" : "Iniciar sesión"}>
-                <IconButton color="inherit" onClick={() => nav(accountPath)} aria-label="Cuenta">
-                  <PersonOutlineIcon />
-                </IconButton>
-              </Tooltip>
+            <Tooltip title={auth.isAuthed ? "Mi cuenta" : "Iniciar sesión"}>
+              <IconButton color="inherit" onClick={() => nav(accountPath)} aria-label="Cuenta">
+                <PersonOutlineIcon />
+              </IconButton>
+            </Tooltip>
 
-              <Tooltip title="Atención al cliente (WhatsApp)">
-                <IconButton color="inherit" onClick={openWhatsApp} aria-label="WhatsApp soporte">
-                  <SupportAgentIcon />
-                </IconButton>
-              </Tooltip>
-            </Box>
-          )}
+            <Tooltip title="Atención al cliente (WhatsApp)">
+              <IconButton color="inherit" onClick={openWhatsApp} aria-label="WhatsApp soporte">
+                <SupportAgentIcon />
+              </IconButton>
+            </Tooltip>
+          </Box>
         </Container>
       </Toolbar>
-
-      {/* Mobile Drawer */}
-      <Drawer
-        anchor="left"
-        open={open}
-        onClose={() => setOpen(false)}
-        PaperProps={{ sx: { width: 290 } }}
-      >
-        <Box sx={{ p: 2 }}>
-          <Typography sx={{ fontWeight: 900, fontSize: 18 }}>
-            <span style={{ color: theme.palette.primary.main }}>che</span>
-            <span style={{ color: theme.palette.secondary.main }}>kea</span>
-          </Typography>
-          <Typography variant="body2" sx={{ color: "text.secondary" }}>
-            {auth.isAuthed ? `Hola, ${auth.user?.email || "Usuario"}` : "Bienvenido"}
-          </Typography>
-        </Box>
-
-        <Divider />
-
-        <List>
-          <ListItemButton onClick={() => go("/")}>
-            <ListItemIcon>
-              <HomeOutlinedIcon />
-            </ListItemIcon>
-            <ListItemText primary="Inicio" />
-          </ListItemButton>
-
-          <ListItemButton onClick={() => go("/cart")}>
-            <ListItemIcon>
-              <ShoppingCartOutlinedIcon />
-            </ListItemIcon>
-            <ListItemText primary="Mi caja" />
-          </ListItemButton>
-
-          <ListItemButton onClick={() => go(accountPath)}>
-            <ListItemIcon>
-              <PersonOutlineIcon />
-            </ListItemIcon>
-            <ListItemText primary={auth.isAuthed ? "Mi cuenta" : "Iniciar sesión"} />
-          </ListItemButton>
-
-          <ListItemButton onClick={openWhatsApp}>
-            <ListItemIcon>
-              <SupportAgentIcon />
-            </ListItemIcon>
-            <ListItemText primary="Atención al cliente (WhatsApp)" />
-          </ListItemButton>
-        </List>
-
-        <Divider />
-
-        <Box sx={{ p: 2 }}>
-          <Typography variant="body2" sx={{ color: "text.secondary" }}>
-            Chekea • compras y envíos
-          </Typography>
-        </Box>
-      </Drawer>
     </AppBar>
   );
 }

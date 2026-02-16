@@ -1,34 +1,29 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { Container, Box, Paper, Typography, Button, Stack } from "@mui/material";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Navigate } from "react-router-dom";
 import Header from "../components/header";
-import { useAuth } from "../state/AuthContext";
+import { useEffectiveAuth } from "../state/useEffectiveAuth";
 import { getFavoritesPageFS } from "../services/favorites.service";
-import ProductGrid from "../components/productgrid"; // ajusta la ruta si es distinta
+import ProductGrid from "../components/productgrid";
 
-// ✅ Cache temporal en memoria (vive mientras la app esté abierta)
-const favCacheByUser = new Map(); // userId -> { primeraCargaHecha, items, lastDoc, hasNext, savedAt }
+// Cache temporal en memoria
+const favCacheByUser = new Map();
 
 export default function FavoritesPage() {
-  const auth = useAuth();
+  const auth = useEffectiveAuth(); // ✅ web user OR rn user
   const nav = useNavigate();
 
-  if (!auth.isAuthed) {
-    nav("/login");
-    return null;
-  }
-
-  // ✅ AJUSTA esto si tu uid viene como auth.user.uid
-  const userId = auth.user?.id || auth.user?.uid;
-
+  // ✅ Hooks SIEMPRE arriba (sin returns antes)
   const [favDocs, setFavDocs] = useState([]);
   const [lastDoc, setLastDoc] = useState(null);
   const [hasNext, setHasNext] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // ✅ userId consistente (en RN lo mandamos como uid; en web puede ser uid o id)
+  const userId = auth.user?.uid || auth.user?.id || null;
+
   const mappedItems = useMemo(() => {
-    // 🔁 Convertimos favorito -> item compatible con ProductGrid
     return favDocs
       .filter((f) => !!f.id)
       .map((f) => ({
@@ -42,75 +37,95 @@ export default function FavoritesPage() {
       }));
   }, [favDocs]);
 
-  function readCache() {
+  const readCache = useCallback(() => {
     if (!userId) return null;
     return favCacheByUser.get(userId) || null;
-  }
+  }, [userId]);
 
-  function writeCache(next) {
-    if (!userId) return;
-    favCacheByUser.set(userId, { ...next, primeraCargaHecha: true, savedAt: Date.now() });
-  }
+  const writeCache = useCallback(
+    (next) => {
+      if (!userId) return;
+      favCacheByUser.set(userId, {
+        ...next,
+        primeraCargaHecha: true,
+        savedAt: Date.now(),
+      });
+    },
+    [userId]
+  );
 
-  async function loadFirstPage({ force = false } = {}) {
-    if (!userId) return;
+  const loadFirstPage = useCallback(
+    async ({ force = false } = {}) => {
+      if (!userId) return;
 
-    // ✅ Si NO es forzado: al volver atrás usamos cache y NO llamamos backend
-    if (!force) {
-      const cached = readCache();
-      if (cached?.primeraCargaHecha) {
-        setFavDocs(cached.items || []);
-        setLastDoc(cached.lastDoc || null);
-        setHasNext(!!cached.hasNext);
-        setError("");
-        setLoading(false);
-        return;
+      if (!force) {
+        const cached = readCache();
+        if (cached?.primeraCargaHecha) {
+          setFavDocs(cached.items || []);
+          setLastDoc(cached.lastDoc || null);
+          setHasNext(!!cached.hasNext);
+          setError("");
+          setLoading(false);
+          return;
+        }
       }
-    }
 
-    // ✅ Primera vez o forzado => llamar backend
-    setLoading(true);
-    setError("");
-    try {
-      const res = await getFavoritesPageFS({ userId, pageSize: 12, lastDoc: null });
-      setFavDocs(res.items);
-      setLastDoc(res.lastDoc);
-      setHasNext(res.hasNext);
+      setLoading(true);
+      setError("");
+      try {
+        const res = await getFavoritesPageFS({ userId, pageSize: 12, lastDoc: null });
+        setFavDocs(res.items || []);
+        setLastDoc(res.lastDoc || null);
+        setHasNext(!!res.hasNext);
+        writeCache({
+          items: res.items || [],
+          lastDoc: res.lastDoc || null,
+          hasNext: !!res.hasNext,
+        });
+      } catch (e) {
+        setError(e?.message || "Error cargando favoritos");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [userId, readCache, writeCache]
+  );
 
-      writeCache({ items: res.items, lastDoc: res.lastDoc, hasNext: res.hasNext });
-    } catch (e) {
-      setError(e?.message || "Error cargando favoritos");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function loadMore() {
+  const loadMore = useCallback(async () => {
     if (!userId || !hasNext || loading) return;
+
     setLoading(true);
     setError("");
     try {
       const res = await getFavoritesPageFS({ userId, pageSize: 12, lastDoc });
 
       setFavDocs((prev) => {
-        const merged = [...prev, ...res.items];
-        writeCache({ items: merged, lastDoc: res.lastDoc, hasNext: res.hasNext });
+        const merged = [...prev, ...(res.items || [])];
+        writeCache({ items: merged, lastDoc: res.lastDoc || null, hasNext: !!res.hasNext });
         return merged;
       });
 
-      setLastDoc(res.lastDoc);
-      setHasNext(res.hasNext);
+      setLastDoc(res.lastDoc || null);
+      setHasNext(!!res.hasNext);
     } catch (e) {
       setError(e?.message || "Error cargando más favoritos");
     } finally {
       setLoading(false);
     }
-  }
+  }, [userId, hasNext, loading, lastDoc, writeCache]);
 
+  // ✅ cargar cuando cambie userId (web o RN)
   useEffect(() => {
+    if (!userId) return;
     loadFirstPage();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
+  }, [userId, loadFirstPage]);
+
+  // ✅ returns condicionales DESPUÉS de hooks
+  if (auth.loading) return null;
+
+  if (!auth.isAuthed) {
+    return <Navigate to="/login" replace />;
+  }
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default", position: "relative" }}>
@@ -121,8 +136,9 @@ export default function FavoritesPage() {
           <Typography variant="h5" sx={{ fontWeight: 900 }}>
             Mis favoritos
           </Typography>
+
           <Typography sx={{ color: "text.secondary", mt: 0.5 }}>
-            {auth.user.email}
+            {auth.user?.email || "Usuario WebView"}
           </Typography>
 
           <Stack spacing={2} sx={{ mt: 2 }}>
@@ -149,7 +165,6 @@ export default function FavoritesPage() {
         </Paper>
       </Container>
 
-      {/* ✅ Botón flotante profesional: forzar refresh (salta el cache y actualiza cache) */}
       <Button
         variant="contained"
         onClick={() => loadFirstPage({ force: true })}

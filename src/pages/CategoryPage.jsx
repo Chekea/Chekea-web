@@ -1,57 +1,47 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Container,
-  Box,
-  Paper,
-  Typography,
-  Alert,
-  Pagination,
-  CircularProgress,
-  Stack,
-} from "@mui/material";
-import { useTranslation } from "react-i18next";
-import {
-  useNavigate,
-  useSearchParams,
-  useNavigationType,
-} from "react-router-dom";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  lazy,
+  Suspense,
+} from "react";
 
-import Header from "../components/header";
-import ProductGrid from "../components/productgrid";
-import SubcategoryBar from "../components/subcategorybar";
+import Container from "@mui/material/Container";
+import Box from "@mui/material/Box";
+import Paper from "@mui/material/Paper";
+import Typography from "@mui/material/Typography";
+import Alert from "@mui/material/Alert";
+import Pagination from "@mui/material/Pagination";
+import CircularProgress from "@mui/material/CircularProgress";
+import Stack from "@mui/material/Stack";
+import useMediaQuery from "@mui/material/useMediaQuery";
+import { useTheme } from "@mui/material/styles";
+
+import { useTranslation } from "react-i18next";
+import { useNavigate, useSearchParams, useNavigationType } from "react-router-dom";
 
 import { getProductsPageFirestore } from "../services/product.firesore.service";
+
+const ProductGrid = lazy(() => import("../components/productgrid"));
+const SubcategoryBar = lazy(() => import("../components/subcategorybar"));
 
 const PAGE_SIZE = 12;
 
 const SUBCATS_BY_CAT = {
-  "Moda & Accesorios": [
-    "Vestidos",
-    "Calzado",
-    "Bolsos",
-    "Trajes",
-    "Pantalones",
-    "Camisas",
-    "Otros",
-  ],
+  "Moda & Accesorios": ["Vestidos", "Calzado", "Bolsos", "Trajes", "Pantalones", "Camisas", "Otros"],
   "Belleza & Accesorios": ["Maquillaje", "Pelo", "Joyas", "Otros"],
   "Complementos para peques": ["Bebés", "Niños", "Moda", "Otros"],
-  Hogar: [
-    "Cocina",
-    "Decoración",
-    "Baño",
-    "Sala de estar",
-    "Dormitorio",
-    "Iluminacion",
-  ],
+  Hogar: ["Cocina", "Decoración", "Baño", "Sala de estar", "Dormitorio", "Iluminacion"],
 };
 
 function CenterLoader({ text = "Cargando productos…" }) {
   return (
-    <Box sx={{ minHeight: "60vh", display: "grid", placeItems: "center" }}>
-      <Stack spacing={2} alignItems="center">
-        <CircularProgress />
-        <Typography sx={{ fontWeight: 900 }}>{text}</Typography>
+    <Box sx={{ minHeight: "55vh", display: "grid", placeItems: "center" }}>
+      <Stack spacing={1.5} alignItems="center">
+        <CircularProgress size={28} />
+        <Typography sx={{ fontWeight: 800, fontSize: 14 }}>{text}</Typography>
       </Stack>
     </Box>
   );
@@ -65,22 +55,17 @@ const pageCache = new Map();
 function makePageKey(category, subcat, sort, page) {
   return `${category}__${subcat}__${sort}__p${page}`;
 }
-
 function cacheGet(key) {
   const hit = pageCache.get(key);
   if (!hit) return null;
-
   if (Date.now() - hit.ts > CACHE_TTL_MS) {
     pageCache.delete(key);
     return null;
   }
-
-  // LRU bump
   pageCache.delete(key);
   pageCache.set(key, hit);
   return hit;
 }
-
 function cacheSet(key, value) {
   pageCache.set(key, value);
   while (pageCache.size > CACHE_MAX_ENTRIES) {
@@ -89,13 +74,13 @@ function cacheSet(key, value) {
   }
 }
 
-/* ==================== Persistencia: página ==================== */
+/* ==================== Persistencia ==================== */
 const LAST_STATE_STORAGE_KEY = "categoryPage:lastState";
+const LAST_DOC_ID_BY_CTX_KEY = "categoryPage:lastDocIdByCtx";
 
 function makeCtxKey(category, subcat, sort) {
   return `${category}__${subcat}__${sort}`;
 }
-
 function readLastState() {
   try {
     const raw = sessionStorage.getItem(LAST_STATE_STORAGE_KEY);
@@ -104,16 +89,11 @@ function readLastState() {
     return null;
   }
 }
-
 function writeLastState(state) {
   try {
     sessionStorage.setItem(LAST_STATE_STORAGE_KEY, JSON.stringify(state));
   } catch {}
 }
-
-/* ==================== Persistencia: cursor SOLO docId ==================== */
-const LAST_DOC_ID_BY_CTX_KEY = "categoryPage:lastDocIdByCtx";
-
 function readLastDocIdMap() {
   try {
     return JSON.parse(sessionStorage.getItem(LAST_DOC_ID_BY_CTX_KEY) || "{}");
@@ -121,24 +101,20 @@ function readLastDocIdMap() {
     return {};
   }
 }
-
 function writeLastDocIdMap(map) {
   try {
     sessionStorage.setItem(LAST_DOC_ID_BY_CTX_KEY, JSON.stringify(map));
   } catch {}
 }
-
 function getLastDocIdForCtx(ctxKey) {
   return readLastDocIdMap()?.[ctxKey] ?? null;
 }
-
 function setLastDocIdForCtx(ctxKey, docId) {
   if (!docId) return;
   const map = readLastDocIdMap();
   map[ctxKey] = docId;
   writeLastDocIdMap(map);
 }
-
 function clearLastDocIdForCtx(ctxKey) {
   const map = readLastDocIdMap();
   delete map[ctxKey];
@@ -150,9 +126,27 @@ export default function CategoryPage() {
   const nav = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // 👇 IMPORTANTE: congelamos el tipo de navegación SOLO al montar este componente.
-  // Así, los REPLACE internos (setSearchParams con replace:true) NO rompen la lógica.
-  const navType = useNavigationType(); // "PUSH" | "POP" | "REPLACE"
+  // ✅ Desktop detection
+  const theme = useTheme();
+  const isDesktop = useMediaQuery(theme.breakpoints.up("md"));
+
+  // ✅ Importa Header solo en desktop (en móvil NO se descarga)
+  const [HeaderComp, setHeaderComp] = useState(null);
+  useEffect(() => {
+    let mounted = true;
+    if (!isDesktop) {
+      setHeaderComp(null);
+      return;
+    }
+    (async () => {
+      const mod = await import("../components/header"); // <-- el header optimizado de arriba
+      if (mounted) setHeaderComp(() => mod.default);
+    })();
+    return () => { mounted = false; };
+  }, [isDesktop]);
+
+  // ✅ Congela navType al montar
+  const navType = useNavigationType();
   const entryNavTypeRef = useRef(null);
   if (entryNavTypeRef.current === null) entryNavTypeRef.current = navType;
   const entryNavType = entryNavTypeRef.current;
@@ -168,26 +162,27 @@ export default function CategoryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // snapshots solo en memoria (para paginar dentro del mismo mount)
   const lastDocsRef = useRef({ 1: null });
   const prevCtxRef = useRef(null);
 
   const ctxKey = useMemo(() => makeCtxKey(category, subcat, sort), [category, subcat, sort]);
   const subcatsForCat = useMemo(() => SUBCATS_BY_CAT[category] ?? [], [category]);
 
+  // ✅ updateParams estable (no depende de searchParams)
   const updateParams = useCallback(
     (patch) => {
-      const next = new URLSearchParams(searchParams);
-      for (const [k, v] of Object.entries(patch)) {
-        if (v === null || v === undefined) next.delete(k);
-        else next.set(k, String(v));
-      }
-      setSearchParams(next, { replace: true });
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        for (const [k, v] of Object.entries(patch)) {
+          if (v === null || v === undefined) next.delete(k);
+          else next.set(k, String(v));
+        }
+        return next;
+      }, { replace: true });
     },
-    [searchParams, setSearchParams]
+    [setSearchParams]
   );
 
-  // proteger ruta
   useEffect(() => {
     if (!category || category === "ALL") nav("/", { replace: true });
   }, [category, nav]);
@@ -199,8 +194,7 @@ export default function CategoryPage() {
     if (hasP && Number.isFinite(pVal) && pVal >= 1) return;
 
     const last = readLastState();
-    if (!last) return;
-    if (last?.ctxKey !== ctxKey) return;
+    if (!last || last?.ctxKey !== ctxKey) return;
 
     if (last?.p && Number.isFinite(last.p) && last.p >= 1) {
       updateParams({ p: last.p });
@@ -213,23 +207,15 @@ export default function CategoryPage() {
     if (!category || category === "ALL") return;
     if (!Number.isFinite(page) || page < 1) return;
 
-    writeLastState({
-      ctxKey,
-      cat: category,
-      subcat,
-      sort,
-      p: page,
-      ts: Date.now(),
-    });
+    writeLastState({ ctxKey, cat: category, subcat, sort, p: page, ts: Date.now() });
   }, [ctxKey, category, subcat, sort, page]);
 
-  // reset si cambia contexto (cat/subcat/sort)
+  // reset si cambia contexto
   useEffect(() => {
     if (prevCtxRef.current === null) {
       prevCtxRef.current = ctxKey;
       return;
     }
-
     if (prevCtxRef.current !== ctxKey) {
       prevCtxRef.current = ctxKey;
       lastDocsRef.current = { 1: null };
@@ -238,24 +224,22 @@ export default function CategoryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctxKey]);
 
-  /* ==================== CARGA ====================
-     ✅ Avanza SOLO cuando la entrada al mount fue PUSH.
-     - page=1 + entryNavType==="PUSH" => usa cursor persistido + bypass cache
-     - si no => usa cache normal / no consume cursor
-  ================================================ */
+  // ✅ evita respuestas viejas
+  const reqIdRef = useRef(0);
+
   useEffect(() => {
+    if (!category || category === "ALL") return;
+
     let alive = true;
+    const myReqId = ++reqIdRef.current;
 
     async function load() {
-      if (!category || category === "ALL") return;
-
       const cacheKey = makePageKey(category, subcat, sort, page);
 
       const isPage1 = page === 1;
-      const shouldAdvance = entryNavType === "PUSH"; // ✅ SOLO PUSH real (congelado)
+      const shouldAdvance = entryNavType === "PUSH";
       const bypassCache = isPage1 && shouldAdvance;
 
-      // cache hit (cuando no forzamos avance)
       if (!bypassCache) {
         const cached = cacheGet(cacheKey);
         if (cached) {
@@ -273,12 +257,8 @@ export default function CategoryPage() {
 
       try {
         const lastDoc = lastDocsRef.current[page] ?? null;
+        const savedLastDocId = isPage1 && shouldAdvance && !lastDoc ? getLastDocIdForCtx(ctxKey) : null;
 
-        // Cursor persistido SOLO si queremos avanzar y estamos en p=1 y no hay snapshot
-        const savedLastDocId =
-          isPage1 && shouldAdvance && !lastDoc ? getLastDocIdForCtx(ctxKey) : null;
-
-        // 1) intento normal
         let res = await getProductsPageFirestore({
           pageSize: PAGE_SIZE,
           category,
@@ -289,16 +269,9 @@ export default function CategoryPage() {
           lastDocId: savedLastDocId,
         });
 
-        // 2) circular (solo si intentamos avanzar)
-        if (
-          isPage1 &&
-          shouldAdvance &&
-          savedLastDocId &&
-          (!res?.items || res.items.length === 0)
-        ) {
+        if (isPage1 && shouldAdvance && savedLastDocId && (!res?.items || res.items.length === 0)) {
           clearLastDocIdForCtx(ctxKey);
           lastDocsRef.current = { 1: null };
-
           res = await getProductsPageFirestore({
             pageSize: PAGE_SIZE,
             category,
@@ -310,16 +283,13 @@ export default function CategoryPage() {
           });
         }
 
-        if (!alive) return;
+        if (!alive || myReqId !== reqIdRef.current) return;
 
         const nextItems = res?.items ?? [];
         setItems(nextItems);
         setHasNext(Boolean(res?.hasNext));
-
-        // snapshot next page
         lastDocsRef.current[page + 1] = res?.lastDoc ?? null;
 
-        // persistir cursor SOLO si avanzamos (PUSH) y p=1
         if (isPage1 && shouldAdvance && res?.lastDocId) {
           setLastDocIdForCtx(ctxKey, res.lastDocId);
         }
@@ -334,23 +304,21 @@ export default function CategoryPage() {
         }
       } catch (e) {
         console.error(e);
-        if (alive) setError(t("loadError"));
+        if (alive && myReqId === reqIdRef.current) setError(t("loadError"));
       } finally {
-        if (!alive) return;
+        if (!alive || myReqId !== reqIdRef.current) return;
         setLoading(false);
-        // no fuerces scroll al volver atrás
         if (entryNavType !== "POP") window.scrollTo({ top: 0, behavior: "auto" });
       }
     }
 
     load();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [category, subcat, sort, page, t, ctxKey, entryNavType]);
 
+  const lang = i18n.language;
   const mappedItems = useMemo(() => {
-    const lang = i18n.language;
+    if (!items?.length) return [];
     return items.map((p) => ({
       ...p,
       title:
@@ -366,7 +334,7 @@ export default function CategoryPage() {
           ? p.shipping_fr ?? p.shipping
           : p.shipping_es ?? p.shipping,
     }));
-  }, [items, i18n.language]);
+  }, [items, lang]);
 
   const paginationCount = useMemo(() => (hasNext ? page + 1 : page), [hasNext, page]);
 
@@ -378,9 +346,17 @@ export default function CategoryPage() {
     [page, hasNext, updateParams]
   );
 
+  // Prefetch del grid tras cargar
+  useEffect(() => {
+    if (!loading) import("../components/productgrid");
+  }, [loading]);
+
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
-      <Header queryText={queryText} onQueryChange={setQueryText} />
+      {/* ✅ Header solo desktop */}
+      {isDesktop && HeaderComp ? (
+        <HeaderComp queryText={queryText} onQueryChange={setQueryText} />
+      ) : null}
 
       <Container maxWidth="lg" sx={{ px: { xs: 1, sm: 2 }, py: 3 }}>
         <Paper
@@ -389,8 +365,7 @@ export default function CategoryPage() {
             p: 3,
             borderRadius: 4,
             mb: 2,
-            background:
-              "linear-gradient(135deg, rgba(15,93,58,0.12), rgba(242,201,76,0.18))",
+            background: "linear-gradient(135deg, rgba(15,93,58,0.12), rgba(242,201,76,0.18))",
           }}
         >
           <Typography variant="h5" sx={{ fontWeight: 900 }}>
@@ -402,11 +377,13 @@ export default function CategoryPage() {
 
           {subcatsForCat.length > 0 && (
             <Box sx={{ mt: 1.5 }}>
-              <SubcategoryBar
-                value={subcat}
-                options={["ALL", ...subcatsForCat]}
-                onChange={(v) => updateParams({ subcat: v, p: 1 })}
-              />
+              <Suspense fallback={null}>
+                <SubcategoryBar
+                  value={subcat}
+                  options={["ALL", ...subcatsForCat]}
+                  onChange={(v) => updateParams({ subcat: v, p: 1 })}
+                />
+              </Suspense>
             </Box>
           )}
         </Paper>
@@ -417,7 +394,9 @@ export default function CategoryPage() {
           <Alert severity="error">{error}</Alert>
         ) : (
           <Paper elevation={0} sx={{ p: 2.5, borderRadius: 4 }}>
-            <ProductGrid items={mappedItems} loading={false} />
+            <Suspense fallback={<CenterLoader text="Renderizando…" />}>
+              <ProductGrid items={mappedItems} loading={false} />
+            </Suspense>
 
             <Box sx={{ display: "flex", justifyContent: "center", mt: 2 }}>
               <Pagination

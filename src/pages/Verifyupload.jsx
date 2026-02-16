@@ -1,24 +1,45 @@
-import React, { useMemo, useState, useCallback, useEffect } from "react";
+import React, { useMemo, useState, useCallback, useEffect, memo } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import {
-  Container,
-  Box,
-  Paper,
-  Typography,
-  Button,
-  Alert,
-  Divider,
-  Stack,
-  TextField,
-  Backdrop,
-  CircularProgress,
-  LinearProgress,
-  Chip,
-  Collapse,
-} from "@mui/material";
 
-import Header from "../components/header";
-import { useAuth } from "../state/AuthContext";
+/* ✅ MUI imports por archivo (mejor rendimiento) */
+import Container from "@mui/material/Container";
+import Box from "@mui/material/Box";
+import Paper from "@mui/material/Paper";
+import Typography from "@mui/material/Typography";
+import Button from "@mui/material/Button";
+import Alert from "@mui/material/Alert";
+import Divider from "@mui/material/Divider";
+import Stack from "@mui/material/Stack";
+import TextField from "@mui/material/TextField";
+import Backdrop from "@mui/material/Backdrop";
+import CircularProgress from "@mui/material/CircularProgress";
+import LinearProgress from "@mui/material/LinearProgress";
+import Chip from "@mui/material/Chip";
+import Collapse from "@mui/material/Collapse";
+import useMediaQuery from "@mui/material/useMediaQuery";
+import { useTheme } from "@mui/material/styles";
+
+/* ✅ Header lazy solo desktop */
+function useDesktopHeader() {
+  const theme = useTheme();
+  const isDesktop = useMediaQuery(theme.breakpoints.up("md"));
+  const [HeaderComp, setHeaderComp] = useState(null);
+
+  useEffect(() => {
+    if (!isDesktop) return;
+    let mounted = true;
+    import("../components/header").then((mod) => {
+      if (mounted) setHeaderComp(() => mod.default);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [isDesktop]);
+
+  return { isDesktop, HeaderComp };
+}
+
+import { useEffectiveAuth } from "../state/useEffectiveAuth";
 import { createCompraDualFS } from "../services/compras.service";
 
 import {
@@ -29,46 +50,128 @@ import {
 import { storage } from "../config/firebase";
 
 import { compressImage, puntodecimal } from "../utils/Helpers";
-
-// ✅ Tu imagen guía local (ya la tenías)
-import prueba from "../assets/homeCats/prueba.JPG";
 import { addInteraccionFS } from "../services/product.firesore.service";
 
+/* ================= helpers ================= */
 function safeNumber(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 }
 
-function calcProductsSubtotal(items) {
-  if (!Array.isArray(items)) return 0;
-  return items.reduce((acc, it) => {
-    const price = safeNumber(it?.precio ?? it?.price ?? it?.Precio ?? 0, 0);
-    const qty = Math.max(1, safeNumber(it?.qty ?? it?.cantidad ?? 1, 1));
-    return acc + price * qty;
-  }, 0);
+function calcTotalsFast(items, discountAmount) {
+  // loop for (más rápido en móviles)
+  let productsSubtotal = 0;
+  let shippingTotal = 0;
+
+  if (Array.isArray(items)) {
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const price = safeNumber(it?.precio ?? it?.price ?? it?.Precio ?? 0, 0);
+      const qty = Math.max(1, safeNumber(it?.qty ?? it?.cantidad ?? 1, 1));
+      productsSubtotal += price * qty;
+
+      const envio = safeNumber(it?.Envio ?? it?.envio ?? 0, 0);
+      shippingTotal += envio;
+    }
+  }
+
+  const total = productsSubtotal - safeNumber(discountAmount, 0) + shippingTotal;
+  const computedFinalTotal = Number(total.toFixed(2));
+
+  return { productsSubtotal, shippingTotal, computedFinalTotal };
 }
 
-function calcShippingTotal(items) {
-  if (!Array.isArray(items)) return 0;
-  return items.reduce((acc, it) => {
-    const envio = safeNumber(it?.Envio ?? it?.envio ?? 0, 0);
-    return acc + envio;
-  }, 0);
-}
+/* ================= memo components ================= */
+
+const LoadingOverlay = memo(function LoadingOverlay({ open, text, pct }) {
+  if (!open) return null; // ✅ no render si no loading
+
+  return (
+    <Backdrop open sx={{ color: "#fff", zIndex: (t) => t.zIndex.drawer + 999 }}>
+      <Paper sx={{ p: 3, borderRadius: 3, minWidth: 320 }}>
+        <Stack spacing={2} alignItems="center">
+          <CircularProgress />
+          <Typography sx={{ fontWeight: 900 }}>{text}</Typography>
+
+          {pct > 0 && pct < 100 && (
+            <Box sx={{ width: "100%" }}>
+              <LinearProgress variant="determinate" value={pct} />
+              <Typography sx={{ mt: 1, textAlign: "center" }}>{pct}%</Typography>
+            </Box>
+          )}
+        </Stack>
+      </Paper>
+    </Backdrop>
+  );
+});
+
+const SubmittedSticky = memo(function SubmittedSticky({ visible, text }) {
+  if (!visible) return null;
+  return (
+    <Box
+      sx={{
+        position: "sticky",
+        top: 0,
+        zIndex: (t) => t.zIndex.appBar + 1,
+        px: 2,
+        py: 1.2,
+        bgcolor: "success.main",
+        color: "success.contrastText",
+      }}
+    >
+      <Typography sx={{ fontWeight: 900, textAlign: "center" }}>{text}</Typography>
+    </Box>
+  );
+});
+
+const SummaryCard = memo(function SummaryCard({
+  codeShort,
+  productsSubtotal,
+  shippingTotal,
+  discountAmount,
+  finalTotalToPay,
+}) {
+  return (
+    <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2 }}>
+      <Stack spacing={0.5}>
+        <Typography sx={{ fontWeight: 900 }}>Resumen</Typography>
+        <Typography sx={{ fontWeight: 700 }}>
+          Productos: XFA {puntodecimal(productsSubtotal)}
+        </Typography>
+        <Typography sx={{ fontWeight: 700 }}>
+          Envío: XFA {puntodecimal(shippingTotal)}
+        </Typography>
+        {discountAmount > 0 && (
+          <Typography sx={{ fontWeight: 800, color: "success.main" }}>
+            Descuento: -XFA {puntodecimal(discountAmount)}
+          </Typography>
+        )}
+        <Divider />
+        <Typography sx={{ fontWeight: 900 }}>
+          Total a pagar: XFA {puntodecimal(finalTotalToPay)}
+        </Typography>
+        <Typography variant="body2" sx={{ color: "text.secondary" }}>
+          En el pago, usa este código: <b>{codeShort}</b>
+        </Typography>
+      </Stack>
+    </Paper>
+  );
+});
 
 export default function VerifyUploadPage() {
   const { orderId } = useParams();
   const nav = useNavigate();
   const location = useLocation();
 
-  const auth = useAuth();
+  const { isDesktop, HeaderComp } = useDesktopHeader();
+
+  const auth = useEffectiveAuth();
   const userId = auth?.user?.uid ?? null;
 
   const itemsToPay = location.state?.itemsToPay ?? [];
   const discountAmount = safeNumber(location.state?.discountAmount ?? 0, 0);
   const finalTotalToPayFromCheckout = location.state?.finalTotalToPay;
   const shipping = location.state?.shippingTotal;
-
 
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
@@ -83,48 +186,29 @@ export default function VerifyUploadPage() {
   const [loadingText, setLoadingText] = useState("Enviando comprobante...");
   const [submitted, setSubmitted] = useState(false);
 
-  // ✅ Mostrar/ocultar guía imagen banco
   const [showBankGuide, setShowBankGuide] = useState(false);
-
-  // ✅ Mostrar/ocultar datos sensibles de cuenta
   const [showAccountDetails, setShowAccountDetails] = useState(false);
-
-  // ✅ Feedback copiar
   const [copied, setCopied] = useState("");
 
   const nombreOk = nombre.trim().length >= 3;
   const contactoOk = contacto.trim().length >= 6;
-
-  // ✅ Si submitted, bloquear TODO excepto “Volver”
   const lockAfterSubmit = submitted;
 
-  const canSubmit =
-    !!file && nombreOk && contactoOk && !!userId && !loading && !submitted;
+  const canSubmit = !!file && nombreOk && contactoOk && !!userId && !loading && !submitted;
 
-  const productsSubtotal = useMemo(
-    () => calcProductsSubtotal(itemsToPay),
-    [itemsToPay]
-  );
-  const shippingTotal = useMemo(
-    () => calcShippingTotal(itemsToPay),
-    [itemsToPay]
-  );
+  const codeShort = useMemo(() => `Ch-${String(orderId ?? "").slice(-5)}`, [orderId]);
 
-  const computedFinalTotal = useMemo(() => {
-    const total = productsSubtotal - discountAmount + shippingTotal;
-    return Number(total.toFixed(2));
-  }, [productsSubtotal, discountAmount, shippingTotal]);
+  /* ✅ Totales rápidos */
+  const { productsSubtotal, shippingTotal, computedFinalTotal } = useMemo(
+    () => calcTotalsFast(itemsToPay, discountAmount),
+    [itemsToPay, discountAmount]
+  );
 
   const finalTotalToPay = useMemo(() => {
     const n = safeNumber(finalTotalToPayFromCheckout, NaN);
     if (Number.isFinite(n)) return Number(n.toFixed(2));
     return computedFinalTotal;
   }, [finalTotalToPayFromCheckout, computedFinalTotal]);
-
-  const codeShort = useMemo(
-    () => `Ch-${String(orderId ?? "").slice(-5)}`,
-    [orderId]
-  );
 
   const buildUserInfo = useCallback(
     () => ({
@@ -134,19 +218,19 @@ export default function VerifyUploadPage() {
     [nombre, contacto]
   );
 
-  // ✅ Limpieza previewUrl
+  /* ✅ limpiar previewUrl */
   useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
 
-  // ✅ Seguridad UX: si se envió, ocultar datos sensibles
+  /* ✅ si submitted: ocultar datos sensibles */
   useEffect(() => {
     if (submitted) setShowAccountDetails(false);
   }, [submitted]);
 
-  // ✅ Auto-ocultar datos sensibles después de X segundos
+  /* ✅ auto-ocultar datos sensibles */
   useEffect(() => {
     if (!showAccountDetails) return;
     const t = setTimeout(() => setShowAccountDetails(false), 20000);
@@ -156,7 +240,6 @@ export default function VerifyUploadPage() {
   const handleFileChange = useCallback(
     (event) => {
       if (lockAfterSubmit) return;
-
       const input = event.target;
       const selected = input.files?.[0] ?? null;
 
@@ -180,7 +263,6 @@ export default function VerifyUploadPage() {
         setFile(selected);
         setPreviewUrl(URL.createObjectURL(selected));
       } catch (e) {
-        console.error(e);
         setFile(null);
         if (previewUrl) URL.revokeObjectURL(previewUrl);
         setPreviewUrl("");
@@ -200,79 +282,67 @@ export default function VerifyUploadPage() {
     setPreviewUrl("");
   }, [previewUrl, lockAfterSubmit]);
 
-  const uploadVerificationToStorage = useCallback(
-    async ({ imageFile, orderId, userId }) => {
-      if (!imageFile || !imageFile.type?.startsWith("image/")) {
-        throw new Error("Archivo inválido (no es imagen)");
-      }
-
-      const MAX_FILE_MB = 8;
-      if (imageFile.size / 1024 / 1024 > MAX_FILE_MB) {
-        throw new Error(`Imagen muy grande (${MAX_FILE_MB}MB máx)`);
-      }
-
-      setLoadingText("Optimizando imagen...");
-      const webpFile = await compressImage(imageFile, {
-        maxWidth: 1200,
-        maxHeight: 900,
-        quality: 0.8,
-        mimeType: "image/webp",
-      });
-
-      const uniqueId =
-        (crypto?.randomUUID && crypto.randomUUID()) ||
-        `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-
-      const path = `Imagenes/Verificaciones/${userId}/${orderId}/${uniqueId}.webp`;
-      const imageRef = storageref(storage, path);
-
-      setLoadingText("Subiendo imagen...");
-      setUploadPct(0);
-
-      const task = uploadBytesResumable(imageRef, webpFile, {
-        contentType: webpFile.type,
-        cacheControl: "public,max-age=31536000,immutable",
-      });
-
-      const snapshot = await new Promise((resolve, reject) => {
-        task.on(
-          "state_changed",
-          (snap) => {
-            const pct = Math.round(
-              (snap.bytesTransferred / snap.totalBytes) * 100
-            );
-            setUploadPct(pct);
-          },
-          reject,
-          () => resolve(task.snapshot)
-        );
-      });
-
-      const url = await getDownloadURL(snapshot.ref);
-
-      return {
-        url,
-        path,
-        filename: webpFile.name,
-        contentType: webpFile.type,
-        size: webpFile.size,
-      };
-    },
-    []
-  );
-
-    const subirInteraccion = async ()=>{
-            const firstItem = itemsToPay[0];
-
-  if (firstItem?.sub && firstItem?.Producto) {
-    await addInteraccionFS({
-      userId,
-      subcategoria: firstItem.sub,
-      productId: firstItem.Producto,
-      cantidad: 8,
-    });
-  }
+  const uploadVerificationToStorage = useCallback(async ({ imageFile, orderId, userId }) => {
+    if (!imageFile || !imageFile.type?.startsWith("image/")) {
+      throw new Error("Archivo inválido (no es imagen)");
     }
+
+    const MAX_FILE_MB = 8;
+    if (imageFile.size / 1024 / 1024 > MAX_FILE_MB) {
+      throw new Error(`Imagen muy grande (${MAX_FILE_MB}MB máx)`);
+    }
+
+    setLoadingText("Optimizando imagen...");
+    const webpFile = await compressImage(imageFile, {
+      maxWidth: 1200,
+      maxHeight: 900,
+      quality: 0.8,
+      mimeType: "image/webp",
+    });
+
+    const uniqueId =
+      (crypto?.randomUUID && crypto.randomUUID()) ||
+      `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+    const path = `Imagenes/Verificaciones/${userId}/${orderId}/${uniqueId}.webp`;
+    const imageRef = storageref(storage, path);
+
+    setLoadingText("Subiendo imagen...");
+    setUploadPct(0);
+
+    const task = uploadBytesResumable(imageRef, webpFile, {
+      contentType: webpFile.type,
+      cacheControl: "public,max-age=31536000,immutable",
+    });
+
+    const snapshot = await new Promise((resolve, reject) => {
+      task.on(
+        "state_changed",
+        (snap) => {
+          const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
+          setUploadPct(pct);
+        },
+        reject,
+        () => resolve(task.snapshot)
+      );
+    });
+
+    const url = await getDownloadURL(snapshot.ref);
+
+    return { url };
+  }, []);
+
+  const subirInteraccion = useCallback(async () => {
+    const firstItem = itemsToPay[0];
+    if (firstItem?.sub && firstItem?.Producto && userId) {
+      await addInteraccionFS({
+        userId,
+        subcategoria: firstItem.sub,
+        productId: firstItem.Producto,
+        cantidad: 8,
+      });
+    }
+  }, [itemsToPay, userId]);
 
   const handleCopy = useCallback(
     async (text, label) => {
@@ -280,10 +350,11 @@ export default function VerifyUploadPage() {
       try {
         await navigator.clipboard.writeText(String(text));
         setCopied(`${label} copiado`);
-        setTimeout(() => setCopied(""), 1500);
       } catch {
         setCopied("No se pudo copiar");
-        setTimeout(() => setCopied(""), 1500);
+      } finally {
+        window.clearTimeout(handleCopy._t);
+        handleCopy._t = window.setTimeout(() => setCopied(""), 1500);
       }
     },
     [lockAfterSubmit]
@@ -323,15 +394,12 @@ export default function VerifyUploadPage() {
         envio: shipping,
       });
 
-      // ✅ SMS visible y estado final (bloquea acciones)
       setOk("✅ Compra exitosa. Comprobante enviado.");
       setSubmitted(true);
 
-      subirInteraccion()
-
-
+      // no bloquea UI si falla
+      subirInteraccion().catch(() => {});
     } catch (e) {
-      console.error(e);
       setErr(e?.message || "No se pudo enviar. Inténtalo de nuevo.");
     } finally {
       setLoading(false);
@@ -349,56 +417,32 @@ export default function VerifyUploadPage() {
     discountAmount,
     finalTotalToPay,
     shipping,
+    subirInteraccion,
   ]);
 
-  // ✅ Datos sensibles
+  /* ✅ Datos sensibles (textos tuyos intactos) */
   const accountHolder = "ANA SOLEDAD MAYOMBI BOTOCO";
   const phoneToRecharge = "555 549928";
   const helpPhone = "222 237169";
 
+  /* ✅ Lazy-load guía SOLO cuando se abre */
+  const [bankGuideSrc, setBankGuideSrc] = useState(null);
+  useEffect(() => {
+    if (!showBankGuide || bankGuideSrc) return;
+    import("../assets/homeCats/prueba.JPG").then((mod) => {
+      setBankGuideSrc(mod.default);
+    });
+  }, [showBankGuide, bankGuideSrc]);
+
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
-      <Header queryText="" onQueryChange={() => {}} />
+      {/* ✅ Header SOLO desktop */}
+      {isDesktop && HeaderComp && <HeaderComp queryText="" onQueryChange={() => {}} />}
 
       {/* ✅ SMS fijo en pantalla (sin navegar) */}
-      {submitted && (
-        <Box
-          sx={{
-            position: "sticky",
-            top: 0,
-            zIndex: (t) => t.zIndex.appBar + 1,
-            px: 2,
-            py: 1.2,
-            bgcolor: "success.main",
-            color: "success.contrastText",
-          }}
-        >
-          <Typography sx={{ fontWeight: 900, textAlign: "center" }}>
-            ✅ Compra exitosa. Comprobante enviado.
-          </Typography>
-        </Box>
-      )}
+      <SubmittedSticky visible={submitted} text="✅ Compra exitosa. Comprobante enviado." />
 
-      <Backdrop
-        open={loading}
-        sx={{ color: "#fff", zIndex: (theme) => theme.zIndex.drawer + 999 }}
-      >
-        <Paper sx={{ p: 3, borderRadius: 3, minWidth: 320 }}>
-          <Stack spacing={2} alignItems="center">
-            <CircularProgress />
-            <Typography sx={{ fontWeight: 900 }}>{loadingText}</Typography>
-
-            {uploadPct > 0 && uploadPct < 100 && (
-              <Box sx={{ width: "100%" }}>
-                <LinearProgress variant="determinate" value={uploadPct} />
-                <Typography sx={{ mt: 1, textAlign: "center" }}>
-                  {uploadPct}%
-                </Typography>
-              </Box>
-            )}
-          </Stack>
-        </Paper>
-      </Backdrop>
+      <LoadingOverlay open={loading} text={loadingText} pct={uploadPct} />
 
       <Container maxWidth="sm" sx={{ py: 3 }}>
         <Paper elevation={0} sx={{ p: 3, borderRadius: 3 }}>
@@ -426,30 +470,13 @@ export default function VerifyUploadPage() {
             </Alert>
           )}
 
-          {/* RESUMEN */}
-          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2 }}>
-            <Stack spacing={0.5}>
-              <Typography sx={{ fontWeight: 900 }}>Resumen</Typography>
-              <Typography sx={{ fontWeight: 700 }}>
-                Productos: XFA {puntodecimal(productsSubtotal)}
-              </Typography>
-              <Typography sx={{ fontWeight: 700 }}>
-                Envío: XFA {puntodecimal(shippingTotal)}
-              </Typography>
-              {discountAmount > 0 && (
-                <Typography sx={{ fontWeight: 800, color: "success.main" }}>
-                  Descuento: -XFA {puntodecimal(discountAmount)}
-                </Typography>
-              )}
-              <Divider />
-              <Typography sx={{ fontWeight: 900 }}>
-                Total a pagar: XFA {puntodecimal(finalTotalToPay)}
-              </Typography>
-              <Typography variant="body2" sx={{ color: "text.secondary" }}>
-                En el pago, usa este código: <b>{codeShort}</b>
-              </Typography>
-            </Stack>
-          </Paper>
+          <SummaryCard
+            codeShort={codeShort}
+            productsSubtotal={productsSubtotal}
+            shippingTotal={shippingTotal}
+            discountAmount={discountAmount}
+            finalTotalToPay={finalTotalToPay}
+          />
 
           <Divider sx={{ my: 2 }} />
 
@@ -488,7 +515,7 @@ export default function VerifyUploadPage() {
             </Alert>
           )}
 
-          {/* INSTRUCCIONES */}
+          {/* INSTRUCCIONES (tus textos intactos) */}
           <Typography sx={{ fontWeight: 900, mb: 1 }}>
             ¿Cómo completar el pago?
           </Typography>
@@ -545,9 +572,7 @@ export default function VerifyUploadPage() {
                 disabled={loading || lockAfterSubmit}
                 sx={{ alignSelf: "flex-start" }}
               >
-                {showAccountDetails
-                  ? "Ocultar datos"
-                  : "Ver datos para ingresar"}
+                {showAccountDetails ? "Ocultar datos" : "Ver datos para ingresar"}
               </Button>
 
               <Typography variant="body2" sx={{ color: "text.secondary" }}>
@@ -558,17 +583,10 @@ export default function VerifyUploadPage() {
               <Collapse in={showAccountDetails}>
                 <Paper
                   variant="outlined"
-                  sx={{
-                    mt: 1,
-                    p: 2,
-                    borderRadius: 2,
-                    bgcolor: "background.paper",
-                  }}
+                  sx={{ mt: 1, p: 2, borderRadius: 2, bgcolor: "background.paper" }}
                 >
                   <Stack spacing={1}>
-                    <Typography sx={{ fontWeight: 900 }}>
-                      Datos para ingresar
-                    </Typography>
+                    <Typography sx={{ fontWeight: 900 }}>Datos para ingresar</Typography>
 
                     <Box
                       sx={{
@@ -589,17 +607,31 @@ export default function VerifyUploadPage() {
 
                     {copied && <Alert severity="success">{copied}</Alert>}
 
+                    <Stack direction="row" spacing={1}>
+                      <Button
+                        variant="outlined"
+                        onClick={() => handleCopy(accountHolder, "Titular")}
+                        disabled={loading || lockAfterSubmit}
+                      >
+                        Copiar titular
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        onClick={() => handleCopy(phoneToRecharge, "Teléfono")}
+                        disabled={loading || lockAfterSubmit}
+                      >
+                        Copiar teléfono
+                      </Button>
+                    </Stack>
+
                     <Alert severity="info">
-                      *Se ocultará automáticamente en unos segundos por
-                      seguridad.
+                      *Se ocultará automáticamente en unos segundos por seguridad.
                     </Alert>
                   </Stack>
                 </Paper>
               </Collapse>
 
-              <Typography>
-                4) Sube una foto o captura clara del comprobante abajo.
-              </Typography>
+              <Typography>4) Sube una foto o captura clara del comprobante abajo.</Typography>
 
               <Button
                 variant="text"
@@ -622,23 +654,32 @@ export default function VerifyUploadPage() {
                     borderColor: "divider",
                   }}
                 >
-                  <Box
-                    component="img"
-                    src={prueba}
-                    alt="Guía de transferencia (ejemplo)"
-                    sx={{
-                      width: "100%",
-                      display: "block",
-                      maxHeight: 320,
-                      objectFit: "contain",
-                    }}
-                  />
+                  {/* ✅ carga lazy: solo cuando se abre */}
+                  {bankGuideSrc ? (
+                    <Box
+                      component="img"
+                      src={bankGuideSrc}
+                      alt="Guía de transferencia (ejemplo)"
+                      loading="lazy"
+                      decoding="async"
+                      sx={{
+                        width: "100%",
+                        display: "block",
+                        maxHeight: 320,
+                        objectFit: "contain",
+                      }}
+                    />
+                  ) : (
+                    <Box sx={{ p: 2 }}>
+                      <Typography sx={{ color: "text.secondary" }}>
+                        Cargando guía...
+                      </Typography>
+                      <LinearProgress sx={{ mt: 1 }} />
+                    </Box>
+                  )}
                 </Box>
 
-                <Typography
-                  variant="body2"
-                  sx={{ mt: 1, color: "text.secondary" }}
-                >
+                <Typography variant="body2" sx={{ mt: 1, color: "text.secondary" }}>
                   *Ejemplo ilustrativo. Asegúrate de colocar el código{" "}
                   <b>{codeShort}</b> en “Concepto / Referencia”.
                 </Typography>
@@ -684,6 +725,8 @@ export default function VerifyUploadPage() {
                 component="img"
                 src={previewUrl}
                 alt="Comprobante"
+                loading="lazy"
+                decoding="async"
                 sx={{
                   width: "100%",
                   maxHeight: 360,
@@ -708,7 +751,6 @@ export default function VerifyUploadPage() {
             </Box>
           )}
 
-          {/* ✅ Si submitted: NO permitir otro botón, solo “Volver” */}
           {!submitted ? (
             <Button
               variant="contained"

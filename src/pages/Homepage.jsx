@@ -30,6 +30,7 @@ import {
   getProductsPageFirestore,
   getHomeSectionsFS,
 } from "../services/product.firesore.service";
+import { useEffectiveAuth } from "../state/useEffectiveAuth";
 
 /** helpers */
 function clampInt(v, fallback, min = 1, max = 100_000) {
@@ -112,6 +113,9 @@ export default function HomePage() {
   const { t, i18n } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const nav = useNavigate();
+const { user } = useEffectiveAuth();
+const userId = user?.uid ?? null;
+
 
   const category = searchParams.get("cat") ?? "ALL";
   const subcat = searchParams.get("subcat") ?? "ALL";
@@ -504,7 +508,7 @@ setNewItems(res.recientes ?? []);
             {t("brandLine")}
           </Typography>
           <Typography sx={{ color: "text.secondary", mt: 0.5 }}>
-            Chekea • {t("deals")}
+            Chekea • {t("deals")} 
           </Typography>
         </Paper>
 

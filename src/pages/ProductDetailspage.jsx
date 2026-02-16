@@ -1,24 +1,36 @@
 // src/pages/ProductDetailsPage.jsx
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  lazy,
+  Suspense,
+} from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import {
-  Container,
-  Box,
-  Paper,
-  Typography,
-  Button,
-  Alert,
-  Stack,
-  Chip,
-  Divider,
-  ToggleButtonGroup,
-  ToggleButton,
-  TextField,
-  MenuItem,
-  Backdrop,
-  CircularProgress,
-} from "@mui/material";
 
+import Container from "@mui/material/Container";
+import Box from "@mui/material/Box";
+import Paper from "@mui/material/Paper";
+import Typography from "@mui/material/Typography";
+import Button from "@mui/material/Button";
+import Alert from "@mui/material/Alert";
+import Stack from "@mui/material/Stack";
+import Chip from "@mui/material/Chip";
+import Divider from "@mui/material/Divider";
+import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
+import ToggleButton from "@mui/material/ToggleButton";
+import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
+import Backdrop from "@mui/material/Backdrop";
+import CircularProgress from "@mui/material/CircularProgress";
+import useMediaQuery from "@mui/material/useMediaQuery";
+import { useTheme } from "@mui/material/styles";
+
+// ⚠️ icons: déjalos si los necesitas, pero esto pesa.
+// Como el Header ya no va en móvil, aquí el impacto es moderado.
+// Si quieres más recorte, te digo cómo “lazy icons” también.
 import StarIcon from "@mui/icons-material/Star";
 import FavoriteBorderIcon from "@mui/icons-material/FavoriteBorder";
 import FavoriteIcon from "@mui/icons-material/Favorite";
@@ -30,9 +42,6 @@ import FlightTakeoffIcon from "@mui/icons-material/FlightTakeoff";
 import LocalOfferIcon from "@mui/icons-material/LocalOffer";
 
 import { useTranslation } from "react-i18next";
-
-import Header from "../components/header";
-import ProductGrid from "../components/productgrid";
 
 import {
   getProductByIdFS,
@@ -49,7 +58,10 @@ import {
 
 import { useCart } from "../state/CartContext";
 import { puntodecimal } from "../utils/Helpers";
-import { useAuth } from "../state/AuthContext";
+import { useEffectiveAuth } from "../state/useEffectiveAuth";
+
+/* ✅ Lazy-load de componentes pesados */
+const ProductGrid = lazy(() => import("../components/productgrid"));
 
 /* -------------------- helpers -------------------- */
 const LS_RECENTS = "chekea_recently_viewed_v1";
@@ -57,7 +69,7 @@ const LS_SHIP_CITY = "chekea_ship_city_v1";
 const LS_SHIP_METHOD = "chekea_ship_method_v1";
 const SS_VIEW_PREFIX = "chekea_viewed_once_v1:";
 
-/** ✅ NUEVO: hasPurchased por usuario (guardado desde CheckoutPage) */
+/** hasPurchased por usuario (guardado desde CheckoutPage) */
 const HAS_PURCHASED_SESSION_KEY = "hasPurchasedByUser";
 function readHasPurchasedForUser(uid) {
   if (!uid) return null;
@@ -137,7 +149,6 @@ function formatDuration(d) {
   return `${d.days} días`;
 }
 
-// tolerancia a nombres de campos
 function pickImgUrl(imgDoc) {
   return (
     imgDoc?.Image ??
@@ -148,8 +159,6 @@ function pickImgUrl(imgDoc) {
     null
   );
 }
-
-// precio con tolerancia
 function getStylePrice(style) {
   if (!style) return 0;
   const v = style.precio ?? style.Precio ?? style.price ?? style.Price ?? 0;
@@ -185,10 +194,7 @@ const DIMENSIONES = [
 ];
 
 function normKey(s) {
-  return String(s ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ");
+  return String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 function estimateShippingFromProduct(city, { method, pesoTipo, dimensionTipo, qty }) {
@@ -200,7 +206,6 @@ function estimateShippingFromProduct(city, { method, pesoTipo, dimensionTipo, qt
     if (!found) return null;
 
     const mid = (found.min + found.max) / 2;
-
     const estimated =
       city === "Malabo"
         ? Math.round(mid * AIR_PRICE_PER_KG * q)
@@ -235,14 +240,12 @@ function estimateShippingFromProduct(city, { method, pesoTipo, dimensionTipo, qt
   };
 }
 
-/* -------------------- YouTube -------------------- */
+/* -------------------- YouTube (lazy: solo si hay id) -------------------- */
 function YouTubeEmbed({ videoId, title = "Chekea Videos" }) {
   if (!videoId) return null;
-
   return (
     <Paper variant="outlined" sx={{ mt: 2, p: 1.5, borderRadius: 2 }}>
       <Typography sx={{ fontWeight: 900, mb: 1 }}>Video</Typography>
-
       <Box
         sx={{
           position: "relative",
@@ -255,42 +258,32 @@ function YouTubeEmbed({ videoId, title = "Chekea Videos" }) {
       >
         <Box
           component="iframe"
-          src={`https://www.youtube.com/embed/${encodeURIComponent(
-            videoId
-          )}?rel=0&modestbranding=1`}
+          loading="lazy"
+          src={`https://www.youtube.com/embed/${encodeURIComponent(videoId)}?rel=0&modestbranding=1`}
           title={title}
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
           allowFullScreen
-          sx={{
-            position: "absolute",
-            inset: 0,
-            width: "100%",
-            height: "100%",
-            border: 0,
-          }}
+          sx={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: 0 }}
         />
       </Box>
     </Paper>
   );
 }
 
-/* -------------------- Center Loader -------------------- */
 function CenterLoader({ text = "Cargando…" }) {
   return (
     <Box sx={{ minHeight: "60vh", display: "grid", placeItems: "center" }}>
       <Stack spacing={2} alignItems="center">
-        <CircularProgress />
+        <CircularProgress size={28} />
         <Typography sx={{ fontWeight: 900 }}>{text}</Typography>
       </Stack>
     </Box>
   );
 }
 
-/* -------------------- Promo SMS -------------------- */
 function StickyPromoSMS({
   message = "🎉 10% de descuento en tu primera compra",
   sub = "Usa el código: PRIMERA10",
-  onCopy,
 }) {
   return (
     <Box
@@ -371,7 +364,7 @@ function StickyPromoSMS({
   );
 }
 
-/* -------------------- ✅ Bottom Action Bar (móvil fixed, blanco, arriba de todo) -------------------- */
+/* BottomActionBar igual que el tuyo (lo dejo tal cual) */
 function BottomActionBar({
   cartSaving,
   disableColorRequired,
@@ -389,21 +382,11 @@ function BottomActionBar({
         left: { xs: 0, sm: "auto" },
         right: { xs: 0, sm: "auto" },
         bottom: { xs: 0, sm: "auto" },
-
-        // ✅ fondo blanco sólido en móvil
         bgcolor: { xs: "#fff", sm: "transparent" },
-        opacity: 1,
-        backdropFilter: "none",
-
-        // ✅ por encima de TODO
         zIndex: { xs: 20000, sm: "auto" },
-
-        // ✅ separación visual
         borderTop: { xs: "1px solid", sm: "none" },
         borderColor: { xs: "divider", sm: "transparent" },
         boxShadow: { xs: "0 -10px 25px rgba(0,0,0,0.12)", sm: "none" },
-
-        // ✅ padding + safe area
         px: { xs: 1, sm: 0 },
         py: { xs: 1, sm: 0 },
         pb: { xs: "calc(env(safe-area-inset-bottom, 0px) + 10px)", sm: 0 },
@@ -411,7 +394,7 @@ function BottomActionBar({
     >
       <Box sx={{ maxWidth: 980, mx: "auto" }}>
         <Stack
-          direction={{ xs: "row", sm: "row" }}
+          direction="row"
           spacing={1}
           sx={{
             mt: { xs: 0, sm: 2 },
@@ -478,13 +461,29 @@ export default function ProductDetailsPage() {
   const nav = useNavigate();
   const { i18n } = useTranslation();
 
+  const theme = useTheme();
+  const isDesktop = useMediaQuery(theme.breakpoints.up("md"));
+
+  // ✅ Header: solo desktop y no se descarga en móvil
+  const [HeaderComp, setHeaderComp] = useState(null);
+  useEffect(() => {
+    let mounted = true;
+    if (!isDesktop) {
+      setHeaderComp(null);
+      return;
+    }
+    (async () => {
+      const mod = await import("../components/header");
+      if (mounted) setHeaderComp(() => mod.default);
+    })();
+    return () => { mounted = false; };
+  }, [isDesktop]);
+
   const cart = useCart();
-  const auth = useAuth();
+  const auth = useEffectiveAuth();
   const userId = auth?.user ? auth.user.uid : null;
 
-  /** ✅ NUEVO: controla banner promo */
   const [hasPurchased, setHasPurchased] = useState(null);
-
   useEffect(() => {
     setHasPurchased(readHasPurchasedForUser(userId));
   }, [userId]);
@@ -507,13 +506,10 @@ export default function ProductDetailsPage() {
   const [favoritoId, setFavoritoId] = useState("");
   const [favBusy, setFavBusy] = useState(false);
 
-  const [fromCache, setFromCache] = useState(false);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
   const [cartSaving, setCartSaving] = useState(false);
-
-  // ✅ leer más / leer menos (detalles)
   const [detailsExpanded, setDetailsExpanded] = useState(false);
 
   useEffect(() => saveShipCity(shipCity), [shipCity]);
@@ -524,9 +520,13 @@ export default function ProductDetailsPage() {
     return product.Codigo ?? product.id ?? id ?? null;
   }, [product, id]);
 
+  // ✅ Protege contra responses viejas (cambio de id rápido)
+  const reqIdRef = useRef(0);
+
   /* -------------------- load product (CACHE + SWR) -------------------- */
   useEffect(() => {
     let alive = true;
+    const myReqId = ++reqIdRef.current;
 
     const resetUI = () => {
       setProduct(null);
@@ -541,7 +541,8 @@ export default function ProductDetailsPage() {
     };
 
     const hydrate = ({ p, c, s, imgs, rel }, isCached) => {
-      setFromCache(Boolean(isCached));
+      if (!alive || myReqId !== reqIdRef.current) return;
+
       setLoading(false);
       setErr("");
 
@@ -569,16 +570,17 @@ export default function ProductDetailsPage() {
       if (cached?.value) {
         hydrate(cached.value, true);
 
+        // SWR refresh (sin bloquear la UI)
         try {
           const p2 = await getProductByIdFS(id);
-          if (!alive || !p2) return;
+          if (!alive || myReqId !== reqIdRef.current || !p2) return;
 
           const [c2, s2, imgs2] = await Promise.all([
             getProductColorsFS(p2.id),
             getProductStylesFS(p2.id),
             getProductImagesFS(p2.id),
           ]);
-          if (!alive) return;
+          if (!alive || myReqId !== reqIdRef.current) return;
 
           let rel2 = [];
           if (p2.Categoria) {
@@ -588,23 +590,21 @@ export default function ProductDetailsPage() {
               pageSize: 4,
             });
           }
-          if (!alive) return;
+          if (!alive || myReqId !== reqIdRef.current) return;
 
           const bundle2 = { p: p2, c: c2, s: s2, imgs: imgs2, rel: rel2 };
           cacheSet(cacheKey, bundle2);
           hydrate(bundle2, true);
         } catch {}
-
         return;
       }
 
       setLoading(true);
-      setFromCache(false);
       resetUI();
 
       try {
         const p = await getProductByIdFS(id);
-        if (!alive) return;
+        if (!alive || myReqId !== reqIdRef.current) return;
 
         if (!p) {
           setErr("Producto no encontrado");
@@ -619,7 +619,7 @@ export default function ProductDetailsPage() {
           getProductStylesFS(p.id),
           getProductImagesFS(p.id),
         ]);
-        if (!alive) return;
+        if (!alive || myReqId !== reqIdRef.current) return;
 
         let rel = [];
         if (p.Categoria) {
@@ -629,13 +629,13 @@ export default function ProductDetailsPage() {
             pageSize: 4,
           });
         }
-        if (!alive) return;
+        if (!alive || myReqId !== reqIdRef.current) return;
 
         const bundle = { p, c: c ?? [], s: s ?? [], imgs: imgs ?? [], rel: rel ?? [] };
         cacheSet(cacheKey, bundle);
         hydrate(bundle, false);
       } catch (e) {
-        if (!alive) return;
+        if (!alive || myReqId !== reqIdRef.current) return;
         console.error(e);
         setErr("Error cargando el producto");
         setLoading(false);
@@ -755,28 +755,16 @@ export default function ProductDetailsPage() {
       ...product,
       _title: title,
       _details: rawDetails,
-      _rawPrice: basePrice,
       _finalPrice: finalPrice,
-
-      shipDuration: duration,
       shipDurationText: formatDuration(duration),
       vendedor,
-
       shipEstimate,
-      shipRangeText:
-        ship?.minValue != null
-          ? ship.mode === "AIR"
-            ? `${ship.minValue}–${ship.maxValue} kg`
-            : `${ship.minValue}–${ship.maxValue} cbm`
-          : "",
-
       rating: product.Rating ?? product.rating ?? "4.0",
       _productKey: productKey,
-
       imgreal,
       imagenesreales: imgreal ? imagenesreales : [],
-
       youtubeId: product?.vid ?? null,
+      Subcategoria: product.Subcategoria ?? product.subcategoria ?? "Otros",
     };
   }, [product, i18n.language, shipCity, shipMethod, qty, productKey, selectedStyle]);
 
@@ -789,6 +777,13 @@ export default function ProductDetailsPage() {
       shipping: lang === "en" ? p.shipping_en : lang === "fr" ? p.shipping_fr : p.shipping,
     }));
   }, [related, i18n.language]);
+
+  // ✅ Prefetch de ProductGrid cuando ya sabemos que lo podríamos usar
+  useEffect(() => {
+    if (mappedRelated.length > 0) {
+      import("../components/productgrid");
+    }
+  }, [mappedRelated.length]);
 
   /* -------------------- favorites toggle (Firestore) -------------------- */
   const toggleFavoriteFS = useCallback(async () => {
@@ -810,22 +805,18 @@ export default function ProductDetailsPage() {
     try {
       if (next) {
         await addInteraccionFS({ userId, subcategoria, productId, cantidad: 2 });
-
         const newFavId = await addToFavoritesFS({
           userId,
           productId,
           productData: mapped,
         });
-
         setFavoritoId(newFavId || "");
       } else {
         let idToDelete = favoritoId;
-
         if (!idToDelete) {
           const fav = await getFavoriteRefFromProductFS({ userId, productId });
           idToDelete = fav?.id ?? "";
         }
-
         if (idToDelete) {
           await removeFromFavoritesFS({ favoritoId: idToDelete, userId, productId });
         }
@@ -856,9 +847,7 @@ export default function ProductDetailsPage() {
 
       const precioReal = Number(mapped._finalPrice ?? 0);
       const Envio = Number(mapped.shipEstimate ?? 0);
-      const Precio = precioReal;
       const url = window.location.href;
-      const subcategoria = mapped.Subcategoria ?? "Otros";
 
       const Img = activeImage ?? mapped.Imagen ?? mapped.image ?? "";
 
@@ -866,32 +855,14 @@ export default function ProductDetailsPage() {
         shipCity ? `Envío a: ${shipCity}` : null,
         mapped.shipDurationText ? `Entrega: ${mapped.shipDurationText}` : null,
         Envio ? `Envío: ${Envio}` : null,
-        selectedColor
-          ? `Color: ${
-              selectedColor.nombre ??
-              selectedColor.name ??
-              selectedColor.label ??
-              selectedColor.Nombre ??
-              ""
-            }`
-          : null,
-        selectedStyle
-          ? `Estilo: ${
-              selectedStyle.nombre ??
-              selectedStyle.name ??
-              selectedStyle.label ??
-              selectedStyle.Nombre ??
-              ""
-            }`
-          : null,
-      ]
-        .filter(Boolean)
-        .join(" • ");
+        selectedColor ? `Color: ${selectedColor.nombre ?? selectedColor.name ?? selectedColor.label ?? selectedColor.Nombre ?? ""}` : null,
+        selectedStyle ? `Estilo: ${selectedStyle.nombre ?? selectedStyle.name ?? selectedStyle.label ?? selectedStyle.Nombre ?? ""}` : null,
+      ].filter(Boolean).join(" • ");
 
       await cart.add({
         Producto: producto,
         Titulo,
-        Precio,
+        Precio: precioReal,
         Envio,
         Img,
         Vendedor,
@@ -899,24 +870,13 @@ export default function ProductDetailsPage() {
         Detalles,
         link: url,
       });
-      await addInteraccionFS({ userId, subcategoria, producto, cantidad: 4 });
+
+      await addInteraccionFS({ userId, subcategoria: mapped.Subcategoria ?? "Otros", producto, cantidad: 4 });
     } finally {
       setCartSaving(false);
     }
-  }, [
-    mapped,
-    activeImage,
-    auth?.isAuthed,
-    nav,
-    cart,
-    qty,
-    shipCity,
-    selectedColor,
-    selectedStyle,
-    userId,
-  ]);
+  }, [mapped, activeImage, auth?.isAuthed, nav, cart, qty, shipCity, selectedColor, selectedStyle, userId]);
 
-  // comprar ahora
   const comprarahora = useCallback(() => {
     if (!mapped) return;
 
@@ -925,54 +885,30 @@ export default function ProductDetailsPage() {
       return;
     }
 
-    const Titulo = mapped._title ?? "Producto";
-    const Vendedor = mapped.vendedor;
     const url = window.location.href;
-    const subcategoria = mapped.Subcategoria ?? "Otros";
 
-    const precioReal = Number(mapped._finalPrice ?? 0);
     const Envio = Number(mapped.shipEstimate ?? 0);
-    const Precio = precioReal;
-
     const Img = activeImage ?? mapped.Imagen ?? mapped.image ?? "";
 
     const Detalles = [
       shipCity ? `Envío a: ${shipCity}` : null,
       mapped.shipDurationText ? `Entrega: ${mapped.shipDurationText}` : null,
       Envio ? `Envío: ${Envio}` : null,
-      selectedColor
-        ? `Color: ${
-            selectedColor.nombre ??
-            selectedColor.name ??
-            selectedColor.label ??
-            selectedColor.Nombre ??
-            ""
-          }`
-        : null,
-      selectedStyle
-        ? `Estilo: ${
-            selectedStyle.nombre ??
-            selectedStyle.name ??
-            selectedStyle.label ??
-            selectedStyle.Nombre ??
-            ""
-          }`
-        : null,
-    ]
-      .filter(Boolean)
-      .join(" • ");
+      selectedColor ? `Color: ${selectedColor.nombre ?? selectedColor.name ?? selectedColor.label ?? selectedColor.Nombre ?? ""}` : null,
+      selectedStyle ? `Estilo: ${selectedStyle.nombre ?? selectedStyle.name ?? selectedStyle.label ?? selectedStyle.Nombre ?? ""}` : null,
+    ].filter(Boolean).join(" • ");
 
     const buyNowItem = {
       Producto: mapped._productKey,
-      Titulo,
-      Precio,
+      Titulo: mapped._title ?? "Producto",
+      Precio: Number(mapped._finalPrice ?? 0),
       Envio,
       Img,
-      Vendedor,
+      Vendedor: mapped.vendedor,
       qty,
       Detalles,
       link: url,
-      sub: subcategoria,
+      sub: mapped.Subcategoria ?? "Otros",
     };
 
     nav("/checkout", { state: { buyNowItem } });
@@ -990,7 +926,6 @@ export default function ProductDetailsPage() {
     } catch {}
   }, [mapped]);
 
-  // lista final de miniaturas
   const thumbUrls = useMemo(() => {
     const base = (images ?? []).map(pickImgUrl).filter(Boolean);
     const real = (mapped?.imagenesreales ?? []).filter(Boolean);
@@ -999,7 +934,6 @@ export default function ProductDetailsPage() {
 
   const disableColorRequired = colors.length > 0 && !selectedColor;
 
-  // ✅ Detecta si hay “más” para mostrar el botón
   const hasMoreDetails = useMemo(() => {
     const txt = String(mapped?._details ?? "").trim();
     return txt.length > 160;
@@ -1007,9 +941,9 @@ export default function ProductDetailsPage() {
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
-      <Header queryText="" onQueryChange={() => {}} />
+      {/* ✅ Header solo desktop */}
+      {isDesktop && HeaderComp ? <HeaderComp queryText="" onQueryChange={() => {}} /> : null}
 
-      {/* ✅ SOLO mostrar promo si sabemos que NO compró aún */}
       {hasPurchased === false && (
         <StickyPromoSMS
           message="🎉 10% de descuento en tu primera compra"
@@ -1017,7 +951,6 @@ export default function ProductDetailsPage() {
         />
       )}
 
-      {/* Loader global mientras se guarda en carrito */}
       <Backdrop open={cartSaving} sx={{ color: "#fff", zIndex: (t) => t.zIndex.drawer + 999 }}>
         <Stack spacing={2} alignItems="center">
           <CircularProgress color="inherit" />
@@ -1025,7 +958,6 @@ export default function ProductDetailsPage() {
         </Stack>
       </Backdrop>
 
-      {/* ✅ padding bottom para que el bar fijo no tape contenido */}
       <Container
         maxWidth="lg"
         sx={{
@@ -1041,10 +973,6 @@ export default function ProductDetailsPage() {
         ) : mapped ? (
           <>
             <Paper elevation={0} sx={{ p: { xs: 2, md: 3 }, borderRadius: 3 }}>
-              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-                {/* {fromCache && <Chip size="small" color="success" label="Cache" />} */}
-              </Stack>
-
               <Box
                 sx={{
                   display: "grid",
@@ -1058,6 +986,8 @@ export default function ProductDetailsPage() {
                     <img
                       src={activeImage ?? mapped.Imagen ?? mapped.image}
                       alt={mapped._title}
+                      loading="eager"
+                      decoding="async"
                       style={{
                         width: "100%",
                         aspectRatio: "1 / 1",
@@ -1071,7 +1001,6 @@ export default function ProductDetailsPage() {
                     <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: "wrap" }}>
                       {thumbUrls.map((url, idx) => {
                         const selected = activeImage === url;
-
                         return (
                           <Box
                             key={`${mapped._productKey}-thumb-${idx}`}
@@ -1088,6 +1017,8 @@ export default function ProductDetailsPage() {
                             <img
                               src={url}
                               alt="thumb"
+                              loading="lazy"
+                              decoding="async"
                               style={{ width: "100%", height: "100%", objectFit: "cover" }}
                             />
                           </Box>
@@ -1116,6 +1047,8 @@ export default function ProductDetailsPage() {
                             <img
                               src={url}
                               alt={`real-${idx + 1}`}
+                              loading="lazy"
+                              decoding="async"
                               style={{ width: "100%", height: "100%", objectFit: "cover" }}
                             />
                           </Box>
@@ -1124,6 +1057,7 @@ export default function ProductDetailsPage() {
                     </Paper>
                   )}
 
+                  {/* ✅ Solo render si hay video */}
                   <YouTubeEmbed videoId={mapped.youtubeId} title={mapped._title} />
                 </Box>
 
@@ -1132,7 +1066,8 @@ export default function ProductDetailsPage() {
                   <Typography variant="h5" sx={{ fontWeight: 900 }}>
                     {mapped._title}
                   </Typography>
-                  <Typography variant="h5" sx={{ fontWeight: 900, marginTop: 2 }}>
+
+                  <Typography variant="h5" sx={{ fontWeight: 900, mt: 2 }}>
                     XFA {puntodecimal(mapped._finalPrice)}
                   </Typography>
 
@@ -1151,7 +1086,7 @@ export default function ProductDetailsPage() {
                     <Chip size="small" label="Envío África" variant="outlined" />
                   </Stack>
 
-                  {/* ✅ Detalles: solo 4 líneas + Leer más */}
+                  {/* Detalles */}
                   <Box sx={{ mt: 1 }}>
                     <Typography
                       sx={{
@@ -1305,7 +1240,6 @@ export default function ProductDetailsPage() {
                     (informativo)
                   </Typography>
 
-                  {/* ✅ Botones: desktop normal / móvil fixed blanco arriba de todo */}
                   <BottomActionBar
                     cartSaving={cartSaving}
                     disableColorRequired={disableColorRequired}
@@ -1329,12 +1263,16 @@ export default function ProductDetailsPage() {
               </Box>
             </Paper>
 
+            {/* ✅ Relacionados: lazy-load ProductGrid solo si hay data */}
             {mappedRelated.length > 0 && (
               <Paper elevation={0} sx={{ mt: 2, p: 2, borderRadius: 3 }}>
                 <Typography variant="h6" sx={{ fontWeight: 900, mb: 2 }}>
                   Productos relacionados
                 </Typography>
-                <ProductGrid items={mappedRelated} loading={false} />
+
+                <Suspense fallback={<CenterLoader text="Cargando relacionados…" />}>
+                  <ProductGrid items={mappedRelated} loading={false} />
+                </Suspense>
               </Paper>
             )}
           </>
