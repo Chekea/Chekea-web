@@ -17,6 +17,7 @@ import Header from "../components/header";
 import { useAuth } from "../state/AuthContext";
 import { getCompraById } from "../services/compras.service";
 import { fechas, puntodecimal } from "../utils/Helpers";
+import { useEffectiveAuth } from "../state/useEffectiveAuth";
 
 const LS_SHIP_CITY = "chekea_ship_city_v1";
 
@@ -45,7 +46,7 @@ function formatCreatedAt(v) {
 export default function OrderDetailsPage() {
   const { id: orderId } = useParams();
   const nav = useNavigate();
-  const auth = useAuth();
+  const auth = useEffectiveAuth();
   const userId = auth?.user?.uid ?? null;
 
   const [order, setOrder] = useState(null);

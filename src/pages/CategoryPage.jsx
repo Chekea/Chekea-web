@@ -260,7 +260,7 @@ export default function CategoryPage() {
         const savedLastDocId = isPage1 && shouldAdvance && !lastDoc ? getLastDocIdForCtx(ctxKey) : null;
 
         let res = await getProductsPageFirestore({
-          pageSize: PAGE_SIZE,
+          pageSize: isDesktop? PAGE_SIZE:6,
           category,
           subcategory: subcat,
           sort,
@@ -273,7 +273,7 @@ export default function CategoryPage() {
           clearLastDocIdForCtx(ctxKey);
           lastDocsRef.current = { 1: null };
           res = await getProductsPageFirestore({
-            pageSize: PAGE_SIZE,
+            pageSize:  isDesktop? PAGE_SIZE:6,
             category,
             subcategory: subcat,
             sort,

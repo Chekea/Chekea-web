@@ -1,7 +1,15 @@
 import React, { useEffect, useMemo, useState, useCallback } from "react";
-import { Container, Box, Paper, Typography, Button, Stack } from "@mui/material";
+import Container from "@mui/material/Container";
+import Box from "@mui/material/Box";
+import Paper from "@mui/material/Paper";
+import Typography from "@mui/material/Typography";
+import Button from "@mui/material/Button";
+import Stack from "@mui/material/Stack";
+import useMediaQuery from "@mui/material/useMediaQuery";
+import { useTheme } from "@mui/material/styles";
+
 import { useNavigate, Navigate } from "react-router-dom";
-import Header from "../components/header";
+
 import { useEffectiveAuth } from "../state/useEffectiveAuth";
 import { getFavoritesPageFS } from "../services/favorites.service";
 import ProductGrid from "../components/productgrid";
@@ -9,18 +17,44 @@ import ProductGrid from "../components/productgrid";
 // Cache temporal en memoria
 const favCacheByUser = new Map();
 
+/* =========================
+   HEADER SOLO DESKTOP (LAZY)
+========================= */
+function useDesktopHeader() {
+  const theme = useTheme();
+  const isDesktop = useMediaQuery(theme.breakpoints.up("md"));
+  const [HeaderComp, setHeaderComp] = useState(null);
+
+  useEffect(() => {
+    if (!isDesktop) return;
+
+    let mounted = true;
+    import("../components/header").then((mod) => {
+      if (mounted) setHeaderComp(() => mod.default);
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, [isDesktop]);
+
+  return { isDesktop, HeaderComp };
+}
+
 export default function FavoritesPage() {
   const auth = useEffectiveAuth(); // ✅ web user OR rn user
   const nav = useNavigate();
 
-  // ✅ Hooks SIEMPRE arriba (sin returns antes)
+  const { isDesktop, HeaderComp } = useDesktopHeader();
+
+  // ✅ Hooks SIEMPRE arriba
   const [favDocs, setFavDocs] = useState([]);
   const [lastDoc, setLastDoc] = useState(null);
   const [hasNext, setHasNext] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // ✅ userId consistente (en RN lo mandamos como uid; en web puede ser uid o id)
+  // ✅ userId consistente
   const userId = auth.user?.uid || auth.user?.id || null;
 
   const mappedItems = useMemo(() => {
@@ -73,7 +107,7 @@ export default function FavoritesPage() {
       setLoading(true);
       setError("");
       try {
-        const res = await getFavoritesPageFS({ userId, pageSize: 12, lastDoc: null });
+        const res = await getFavoritesPageFS({ userId, pageSize: isDesktop?12:6, lastDoc: null });
         setFavDocs(res.items || []);
         setLastDoc(res.lastDoc || null);
         setHasNext(!!res.hasNext);
@@ -97,7 +131,7 @@ export default function FavoritesPage() {
     setLoading(true);
     setError("");
     try {
-      const res = await getFavoritesPageFS({ userId, pageSize: 12, lastDoc });
+      const res = await getFavoritesPageFS({ userId, pageSize: isDesktop? 12:6, lastDoc });
 
       setFavDocs((prev) => {
         const merged = [...prev, ...(res.items || [])];
@@ -114,7 +148,6 @@ export default function FavoritesPage() {
     }
   }, [userId, hasNext, loading, lastDoc, writeCache]);
 
-  // ✅ cargar cuando cambie userId (web o RN)
   useEffect(() => {
     if (!userId) return;
     loadFirstPage();
@@ -129,18 +162,11 @@ export default function FavoritesPage() {
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default", position: "relative" }}>
-      <Header queryText="" onQueryChange={() => {}} />
+      {/* ✅ Header SOLO en desktop, en móvil NO se importa ni se renderiza */}
+      {isDesktop && HeaderComp ? <HeaderComp queryText="" onQueryChange={() => {}} /> : null}
 
       <Container maxWidth="lg" sx={{ px: { xs: 1, sm: 2 }, py: { xs: 2, md: 3 } }}>
         <Paper elevation={0} sx={{ p: 3, borderRadius: 3 }}>
-          <Typography variant="h5" sx={{ fontWeight: 900 }}>
-            Mis favoritos
-          </Typography>
-
-          <Typography sx={{ color: "text.secondary", mt: 0.5 }}>
-            {auth.user?.email || "Usuario WebView"}
-          </Typography>
-
           <Stack spacing={2} sx={{ mt: 2 }}>
             {error ? <Typography sx={{ color: "error.main" }}>{error}</Typography> : null}
 
@@ -158,9 +184,9 @@ export default function FavoritesPage() {
               </Button>
             ) : null}
 
-            <Button variant="outlined" onClick={() => nav("/account")}>
+            {isDesktop && <Button variant="outlined" onClick={() => nav("/account")}>
               Volver
-            </Button>
+            </Button>}
           </Stack>
         </Paper>
       </Container>

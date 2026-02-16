@@ -789,7 +789,7 @@ export default function ProductDetailsPage() {
   const toggleFavoriteFS = useCallback(async () => {
     if (!mapped?._productKey) return;
 
-    if (!auth?.isAuthed || !userId) {
+    if (!userId) {
       nav("/login");
       return;
     }
@@ -828,13 +828,13 @@ export default function ProductDetailsPage() {
     } finally {
       setFavBusy(false);
     }
-  }, [mapped, auth?.isAuthed, userId, nav, wishOn, favoritoId, favBusy]);
+  }, [mapped,   userId, nav, wishOn, favoritoId, favBusy]);
 
   /* -------------------- cart add (con loader) -------------------- */
   const addToCart = useCallback(async () => {
     if (!mapped) return;
 
-    if (!auth?.isAuthed) {
+    if (!userId) {
       nav("/login");
       return;
     }
@@ -875,12 +875,12 @@ export default function ProductDetailsPage() {
     } finally {
       setCartSaving(false);
     }
-  }, [mapped, activeImage, auth?.isAuthed, nav, cart, qty, shipCity, selectedColor, selectedStyle, userId]);
+  }, [mapped, activeImage,   nav, cart, qty, shipCity, selectedColor, selectedStyle, userId]);
 
   const comprarahora = useCallback(() => {
     if (!mapped) return;
 
-    if (!auth?.isAuthed) {
+    if (!userId) {
       nav("/login");
       return;
     }
@@ -912,7 +912,7 @@ export default function ProductDetailsPage() {
     };
 
     nav("/checkout", { state: { buyNowItem } });
-  }, [mapped, auth?.isAuthed, nav, activeImage, qty, shipCity, selectedColor, selectedStyle]);
+  }, [mapped,userId, nav, activeImage, qty, shipCity, selectedColor, selectedStyle]);
 
   const onShare = useCallback(async () => {
     if (!mapped) return;

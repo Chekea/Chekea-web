@@ -1,11 +1,4 @@
-// src/pages/CheckoutPage.jsx
-import React, {
-  useEffect,
-  useMemo,
-  useState,
-  useCallback,
-  memo,
-} from "react";
+import React, { useEffect, useMemo, useState, useCallback, memo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 
 import Container from "@mui/material/Container";
@@ -18,7 +11,6 @@ import Alert from "@mui/material/Alert";
 import Chip from "@mui/material/Chip";
 import Divider from "@mui/material/Divider";
 import useMediaQuery from "@mui/material/useMediaQuery";
-
 import { useTheme } from "@mui/material/styles";
 
 import { useCart } from "../state/CartContext";
@@ -26,6 +18,7 @@ import { useAuth } from "../state/AuthContext";
 import { puntodecimal } from "../utils/Helpers";
 import { getCurrentTimestamp, checkCompras } from "../services/compras.service";
 import { getCheckoutFromCache } from "../utils/checkoutwebview";
+import { useEffectiveAuth } from "../state/useEffectiveAuth";
 
 /* =========================
    HEADER SOLO DESKTOP (LAZY)
@@ -37,7 +30,6 @@ function useDesktopHeader() {
 
   useEffect(() => {
     if (!isDesktop) return;
-
     let mounted = true;
 
     import("../components/header").then((mod) => {
@@ -108,12 +100,7 @@ const MobileFixedPayBar = memo(function MobileFixedPayBar({
 /* =========================
    ITEM MEMOIZADO
 ========================= */
-const CheckoutItem = memo(function CheckoutItem({
-  item,
-  isBuyNow,
-  locationState,
-  onRemove,
-}) {
+const CheckoutItem = memo(function CheckoutItem({ item, showRemove, onRemove }) {
   return (
     <Paper sx={{ p: 2, mb: 1.5, borderRadius: 2 }}>
       <Stack direction="row" spacing={2} alignItems="center">
@@ -130,8 +117,8 @@ const CheckoutItem = memo(function CheckoutItem({
           }}
         />
 
-        <Box sx={{ flex: 1 }}>
-          <Typography sx={{ fontWeight: 900 }}>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography sx={{ fontWeight: 900 }} noWrap title={item.titulo}>
             {item.titulo}
           </Typography>
 
@@ -147,17 +134,14 @@ const CheckoutItem = memo(function CheckoutItem({
             Envio: <b>XFA {puntodecimal(item.Envio)}</b>
           </Typography>
 
-          {item.Detalles && (
-            <Typography
-              sx={{ mt: 0.5, color: "text.secondary" }}
-              variant="body2"
-            >
+          {item.Detalles ? (
+            <Typography sx={{ mt: 0.5, color: "text.secondary" }} variant="body2">
               {item.Detalles}
             </Typography>
-          )}
+          ) : null}
         </Box>
 
-        {!isBuyNow && locationState && (
+        {showRemove ? (
           <Button
             variant="outlined"
             color="error"
@@ -166,7 +150,7 @@ const CheckoutItem = memo(function CheckoutItem({
           >
             Quitar
           </Button>
-        )}
+        ) : null}
       </Stack>
     </Paper>
   );
@@ -176,27 +160,31 @@ export default function CheckoutPage() {
   const cart = useCart();
   const nav = useNavigate();
   const location = useLocation();
-  const auth = useAuth();
+  const auth = useEffectiveAuth(); // ✅ web user OR rn user
 
+  console.log(auth)
   const { isDesktop, HeaderComp } = useDesktopHeader();
 
+  // flujo web normal
   const buyNowItem = location.state?.buyNowItem ?? null;
   const selectedIdsArr = location.state?.selectedIds ?? [];
   const isBuyNow = Boolean(buyNowItem);
 
-  const selectedIds =
-    selectedIdsArr.length > 0 ? new Set(selectedIdsArr) : null;
+  // set solo si hay ids
+  const selectedIds = useMemo(() => {
+    return selectedIdsArr.length ? new Set(selectedIdsArr) : null;
+  }, [selectedIdsArr]);
 
+  // flujo webview: items cacheados por bridge RN (sessionStorage o window.__RN_STATE__)
   const webviewItems = useMemo(() => {
-    if (location.state) return null;
+    if (location.state) return null; // web normal manda state → prioridad web
     return getCheckoutFromCache();
   }, [location.state]);
 
   const itemsToPay = useMemo(() => {
     if (buyNowItem) return [buyNowItem];
-    if (selectedIds)
-      return cart.items.filter((it) => selectedIds.has(it.id));
-    if (webviewItems?.length) return webviewItems;
+    if (selectedIds) return cart.items.filter((it) => selectedIds.has(it.id));
+    if (Array.isArray(webviewItems) && webviewItems.length) return webviewItems;
     return [];
   }, [buyNowItem, selectedIds, cart.items, webviewItems]);
 
@@ -204,7 +192,7 @@ export default function CheckoutPage() {
 
   useEffect(() => {
     const uid = auth.user?.uid;
-    if (!auth.isAuthed || !uid) return;
+    if (!uid) return;
 
     let alive = true;
 
@@ -229,17 +217,17 @@ export default function CheckoutPage() {
 
     for (let i = 0; i < itemsToPay.length; i++) {
       const it = itemsToPay[i];
-      const qty = it.qty ?? 1;
-      products += it.Precio * qty;
-      shipping += it.Envio;
+      const qty = Math.max(1, Number(it.qty ?? 1));
+      products += Number(it.Precio ?? 0) * qty;
+      shipping += Number(it.Envio ?? 0);
     }
 
-    const discount = products * discountRate;
-    const final = products - discount + shipping;
+    const discount = Number((products * discountRate).toFixed(2));
+    const final = Number((products - discount + shipping).toFixed(2));
 
     return {
-      productsSubtotal: products,
-      shippingTotal: shipping,
+      productsSubtotal: Number(products.toFixed(2)),
+      shippingTotal: Number(shipping.toFixed(2)),
       discountAmount: discount,
       finalTotal: final,
     };
@@ -266,16 +254,13 @@ export default function CheckoutPage() {
     });
   }, [auth.isAuthed, nav, itemsToPay, hasPurchases, discountRate, totals]);
 
-  const handleRemove = useCallback(
-    (id) => cart.remove(id),
-    [cart]
-  );
+  const handleRemove = useCallback((id) => cart.remove(id), [cart]);
+
+  const showRemove = !isBuyNow && Boolean(location.state); // solo flujo web con state
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
-      {isDesktop && HeaderComp && (
-        <HeaderComp queryText="" onQueryChange={() => {}} />
-      )}
+      {isDesktop && HeaderComp ? <HeaderComp queryText="" onQueryChange={() => {}} /> : null}
 
       <MobileFixedPayBar
         visible={itemsToPay.length > 0}
@@ -290,7 +275,7 @@ export default function CheckoutPage() {
             Checkout
           </Typography>
 
-          {/* 🔴 TU TEXTO ORIGINAL SE MANTIENE */}
+          {/* ✅ TU TEXTO ORIGINAL SE MANTIENE */}
           <Alert severity="info" sx={{ mt: 2 }}>
             <Typography sx={{ fontWeight: 900 }}>
               Aviso importante sobre envíos
@@ -311,10 +296,9 @@ export default function CheckoutPage() {
               <Box sx={{ mt: 2 }}>
                 {itemsToPay.map((item) => (
                   <CheckoutItem
-                    key={item.id}
+                    key={item.id ?? `${item.titulo}-${item.Precio}-${item.Img}`}
                     item={item}
-                    isBuyNow={isBuyNow}
-                    locationState={location.state}
+                    showRemove={showRemove}
                     onRemove={handleRemove}
                   />
                 ))}
@@ -329,15 +313,14 @@ export default function CheckoutPage() {
                   Envío: XFA {puntodecimal(totals.shippingTotal)}
                 </Typography>
 
-                {hasPurchases === false && (
+                {hasPurchases === false ? (
                   <>
                     <Typography sx={{ fontWeight: 800, color: "success.main" }}>
-                      Descuento solo en productos (10%): XFA -
-                      {puntodecimal(totals.discountAmount)}
+                      Descuento solo en productos (10%): XFA -{puntodecimal(totals.discountAmount)}
                     </Typography>
                     <Divider />
                   </>
-                )}
+                ) : null}
 
                 <Typography sx={{ fontWeight: 900 }}>
                   Total: XFA {puntodecimal(totals.finalTotal)}

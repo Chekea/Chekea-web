@@ -22,7 +22,11 @@ const LoginPage = lazy(() => import("../pages/LoginPage"));
 const AccountPage = lazy(() => import("../pages/AccountPage"));
 const CartPage = lazy(() => import("../pages/CartPage"));
 const SearchResultsPage = lazy(() => import("../pages/ResultPage"));
- 
+const OrdersPage = lazy(() => import("../pages/OrdersPage"));
+const OrderDetailsPage = lazy(() => import("../pages/OrderDetailsPage"));
+
+
+
 function AppFallback() {
   return <div style={{ padding: 16 }}>Cargando...</div>;
 }
@@ -56,6 +60,7 @@ export default function AppRouter({ initialRNState }) {
                   }
                 />
 
+
                 <Route path="/search" element={<SearchResultsPage />} />
 
                 {/* 🔥 CRÍTICA – sin lazy */}
@@ -82,6 +87,9 @@ export default function AppRouter({ initialRNState }) {
                     </ProtectedRoute>
                   }
                 />
+                                <Route path="/account/orders" element={<OrdersPage />} />
+                <Route path="/account/orders/:id" element={<OrderDetailsPage />} />
+
 
                 <Route path="*" element={<Navigate to="/" replace />} />
 

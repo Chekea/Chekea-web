@@ -12,13 +12,13 @@ import {
 import { useNavigate } from "react-router-dom";
 
 import Header from "../components/header";
-import { useAuth } from "../state/AuthContext";
 
 // ✅ NUEVO: servicio Firestore
 import { listMyOrdersPageFS } from "../services/orders.firestore.service";
+import { useEffectiveAuth } from "../state/useEffectiveAuth";
 
 export default function OrdersPage() {
-  const auth = useAuth();
+  const auth = useEffectiveAuth();
   const nav = useNavigate();
 
   // paging state
@@ -40,6 +40,8 @@ export default function OrdersPage() {
   }, [auth.loading, auth.isAuthed, nav]);
 
   const userId = auth.user?.id;
+
+  console.log('hoal')
 
   // first load
   useEffect(() => {
@@ -142,7 +144,7 @@ export default function OrdersPage() {
     console.log(id)
   console.log(auth)
 
-    nav(`/orders/${id}`)
+    nav(`/account/orders/${id}`)
   }
 
   if (auth.loading) return null;
