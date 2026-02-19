@@ -6,8 +6,7 @@ import React, {
   useState,
   useCallback,
 } from "react";
-import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "../config/firebase";
+
 import {
   getCartCache,
   setCartCache,
@@ -17,6 +16,8 @@ import {
   removeFromCartFS,
   clearCartFS,
 } from "../services/cart.service";
+
+import { useEffectiveAuth } from "../state/useEffectiveAuth";
 
 const CartContext = createContext(null);
 
@@ -38,24 +39,16 @@ function loadSelection(uid) {
 function saveSelection(uid, setIds) {
   try {
     localStorage.setItem(selKey(uid), JSON.stringify(Array.from(setIds)));
-  } catch {
-    // ignore
-  }
+  } catch {}
 }
 
 export function CartProvider({ children }) {
-  const [uid, setUid] = useState(null);
+  const auth = useEffectiveAuth();
+  const uid = auth?.user?.uid || auth?.user?.id || null; // ✅ única fuente
+
   const [items, setItems] = useState([]);
   const [ready, setReady] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
-
-  // Auth
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (user) => {
-      setUid(user?.uid ?? null);
-    });
-    return () => unsub();
-  }, []);
 
   // Load cart + subscribe
   useEffect(() => {
@@ -89,7 +82,7 @@ export function CartProvider({ children }) {
           setItems(nextItems);
           setCartCache(uid, nextItems);
 
-          // reconciliar selección (quita ids que ya no existan)
+          // reconciliar selección
           setSelectedIds((prev) => {
             const existing = new Set(nextItems.map((x) => x.id));
             const next = new Set([...prev].filter((id) => existing.has(id)));
@@ -113,9 +106,7 @@ export function CartProvider({ children }) {
     };
   }, [uid]);
 
-  /** -------------------------
-   * totals
-   * ------------------------- */
+  /** totals */
   const total = useCallback(() => {
     return items.reduce(
       (acc, p) => acc + Number(p.Precio || 0) * Number(p.qty || 0),
@@ -136,9 +127,7 @@ export function CartProvider({ children }) {
 
   const selectedCount = selectedItems.length;
 
-  /** -------------------------
-   * selection actions
-   * ------------------------- */
+  /** selection actions */
   const toggleSelect = useCallback(
     (id) => {
       if (!uid) return;
@@ -171,25 +160,10 @@ export function CartProvider({ children }) {
     });
   }, [uid]);
 
-  /** -------------------------
-   * CRUD actions
-   * ------------------------- */
-
-  // ✅ ADD: escribe directo a Firestore
+  /** CRUD actions */
   const add = useCallback(
     async (product, { mergeQty = true } = {}) => {
       if (!uid) throw new Error("Usuario no autenticado");
-
-      // optional: seleccionar automáticamente al añadir (mejor UX)
-      // setSelectedIds((prev) => {
-      //   const next = new Set(prev);
-      //   next.add(product.id);
-      //   saveSelection(uid, next);
-      //   return next;
-      // });
-
-      console.log(uid)
-
       await addToCartFS(uid, product, { mergeQty });
     },
     [uid]
@@ -198,7 +172,6 @@ export function CartProvider({ children }) {
   const setQty = useCallback(
     async (id, qty) => {
       const safeQty = Math.max(1, Number(qty || 1));
-      // optimistic UI
       setItems((prev) => prev.map((p) => (p.id === id ? { ...p, qty: safeQty } : p)));
       if (!uid) return;
       await setQtyCartFS(uid, id, safeQty);
@@ -235,16 +208,13 @@ export function CartProvider({ children }) {
       ready,
       items,
 
-      // totals
       total,
 
-      // crud
       add,
       setQty,
       remove,
       clear,
 
-      // selection
       selectedIds,
       toggleSelect,
       selectAll,

@@ -28,9 +28,6 @@ import CircularProgress from "@mui/material/CircularProgress";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import { useTheme } from "@mui/material/styles";
 
-// ⚠️ icons: déjalos si los necesitas, pero esto pesa.
-// Como el Header ya no va en móvil, aquí el impacto es moderado.
-// Si quieres más recorte, te digo cómo “lazy icons” también.
 import StarIcon from "@mui/icons-material/Star";
 import FavoriteBorderIcon from "@mui/icons-material/FavoriteBorder";
 import FavoriteIcon from "@mui/icons-material/Favorite";
@@ -76,7 +73,9 @@ function readHasPurchasedForUser(uid) {
   try {
     const raw = sessionStorage.getItem(HAS_PURCHASED_SESSION_KEY);
     const map = raw ? JSON.parse(raw) : {};
-    return Object.prototype.hasOwnProperty.call(map, uid) ? Boolean(map[uid]) : null;
+    return Object.prototype.hasOwnProperty.call(map, uid)
+      ? Boolean(map[uid])
+      : null;
   } catch {
     return null;
   }
@@ -456,6 +455,39 @@ function BottomActionBar({
   );
 }
 
+/* ✅ NUEVO: Barra inferior SOLO móvil cuando NO hay usuario logueado */
+function BottomLoginBar({ text = "Inicia sesión para comprar" }) {
+  return (
+    <Box
+      sx={{
+        position: "fixed",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        bgcolor: "#fff",
+        zIndex: 20000,
+        borderTop: "1px solid",
+        borderColor: "divider",
+        boxShadow: "0 -10px 25px rgba(0,0,0,0.12)",
+        px: 1,
+        py: 1,
+        pb: "calc(env(safe-area-inset-bottom, 0px) + 10px)",
+      }}
+    >
+      <Box sx={{ maxWidth: 980, mx: "auto" }}>
+        <Button
+          fullWidth
+          variant="contained"
+          disabled
+          sx={{ height: 44, fontWeight: 900 }}
+        >
+          {text}
+        </Button>
+      </Box>
+    </Box>
+  );
+}
+
 export default function ProductDetailsPage() {
   const { id } = useParams();
   const nav = useNavigate();
@@ -476,12 +508,17 @@ export default function ProductDetailsPage() {
       const mod = await import("../components/header");
       if (mounted) setHeaderComp(() => mod.default);
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [isDesktop]);
 
   const cart = useCart();
   const auth = useEffectiveAuth();
   const userId = auth?.user ? auth.user.uid : null;
+
+  // ✅ NUEVO: condición para mostrar CTA disabled en móvil si NO hay sesión
+  const showLoginBarOnMobile = !isDesktop && !userId;
 
   const [hasPurchased, setHasPurchased] = useState(null);
   useEffect(() => {
@@ -540,7 +577,7 @@ export default function ProductDetailsPage() {
       setDetailsExpanded(false);
     };
 
-    const hydrate = ({ p, c, s, imgs, rel }, isCached) => {
+    const hydrate = ({ p, c, s, imgs, rel }) => {
       if (!alive || myReqId !== reqIdRef.current) return;
 
       setLoading(false);
@@ -568,7 +605,7 @@ export default function ProductDetailsPage() {
       const cached = cacheGet(cacheKey);
 
       if (cached?.value) {
-        hydrate(cached.value, true);
+        hydrate(cached.value);
 
         // SWR refresh (sin bloquear la UI)
         try {
@@ -594,7 +631,7 @@ export default function ProductDetailsPage() {
 
           const bundle2 = { p: p2, c: c2, s: s2, imgs: imgs2, rel: rel2 };
           cacheSet(cacheKey, bundle2);
-          hydrate(bundle2, true);
+          hydrate(bundle2);
         } catch {}
         return;
       }
@@ -633,7 +670,7 @@ export default function ProductDetailsPage() {
 
         const bundle = { p, c: c ?? [], s: s ?? [], imgs: imgs ?? [], rel: rel ?? [] };
         cacheSet(cacheKey, bundle);
-        hydrate(bundle, false);
+        hydrate(bundle);
       } catch (e) {
         if (!alive || myReqId !== reqIdRef.current) return;
         console.error(e);
@@ -828,7 +865,7 @@ export default function ProductDetailsPage() {
     } finally {
       setFavBusy(false);
     }
-  }, [mapped,   userId, nav, wishOn, favoritoId, favBusy]);
+  }, [mapped, userId, nav, wishOn, favoritoId, favBusy]);
 
   /* -------------------- cart add (con loader) -------------------- */
   const addToCart = useCallback(async () => {
@@ -855,9 +892,27 @@ export default function ProductDetailsPage() {
         shipCity ? `Envío a: ${shipCity}` : null,
         mapped.shipDurationText ? `Entrega: ${mapped.shipDurationText}` : null,
         Envio ? `Envío: ${Envio}` : null,
-        selectedColor ? `Color: ${selectedColor.nombre ?? selectedColor.name ?? selectedColor.label ?? selectedColor.Nombre ?? ""}` : null,
-        selectedStyle ? `Estilo: ${selectedStyle.nombre ?? selectedStyle.name ?? selectedStyle.label ?? selectedStyle.Nombre ?? ""}` : null,
-      ].filter(Boolean).join(" • ");
+        selectedColor
+          ? `Color: ${
+              selectedColor.nombre ??
+              selectedColor.name ??
+              selectedColor.label ??
+              selectedColor.Nombre ??
+              ""
+            }`
+          : null,
+        selectedStyle
+          ? `Estilo: ${
+              selectedStyle.nombre ??
+              selectedStyle.name ??
+              selectedStyle.label ??
+              selectedStyle.Nombre ??
+              ""
+            }`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" • ");
 
       await cart.add({
         Producto: producto,
@@ -871,11 +926,16 @@ export default function ProductDetailsPage() {
         link: url,
       });
 
-      await addInteraccionFS({ userId, subcategoria: mapped.Subcategoria ?? "Otros", producto, cantidad: 4 });
+      await addInteraccionFS({
+        userId,
+        subcategoria: mapped.Subcategoria ?? "Otros",
+        producto,
+        cantidad: 4,
+      });
     } finally {
       setCartSaving(false);
     }
-  }, [mapped, activeImage,   nav, cart, qty, shipCity, selectedColor, selectedStyle, userId]);
+  }, [mapped, activeImage, nav, cart, qty, shipCity, selectedColor, selectedStyle, userId]);
 
   const comprarahora = useCallback(() => {
     if (!mapped) return;
@@ -894,9 +954,27 @@ export default function ProductDetailsPage() {
       shipCity ? `Envío a: ${shipCity}` : null,
       mapped.shipDurationText ? `Entrega: ${mapped.shipDurationText}` : null,
       Envio ? `Envío: ${Envio}` : null,
-      selectedColor ? `Color: ${selectedColor.nombre ?? selectedColor.name ?? selectedColor.label ?? selectedColor.Nombre ?? ""}` : null,
-      selectedStyle ? `Estilo: ${selectedStyle.nombre ?? selectedStyle.name ?? selectedStyle.label ?? selectedStyle.Nombre ?? ""}` : null,
-    ].filter(Boolean).join(" • ");
+      selectedColor
+        ? `Color: ${
+            selectedColor.nombre ??
+            selectedColor.name ??
+            selectedColor.label ??
+            selectedColor.Nombre ??
+            ""
+          }`
+        : null,
+      selectedStyle
+        ? `Estilo: ${
+            selectedStyle.nombre ??
+            selectedStyle.name ??
+            selectedStyle.label ??
+            selectedStyle.Nombre ??
+            ""
+          }`
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" • ");
 
     const buyNowItem = {
       Producto: mapped._productKey,
@@ -912,7 +990,7 @@ export default function ProductDetailsPage() {
     };
 
     nav("/checkout", { state: { buyNowItem } });
-  }, [mapped,userId, nav, activeImage, qty, shipCity, selectedColor, selectedStyle]);
+  }, [mapped, userId, nav, activeImage, qty, shipCity, selectedColor, selectedStyle]);
 
   const onShare = useCallback(async () => {
     if (!mapped) return;
@@ -963,7 +1041,8 @@ export default function ProductDetailsPage() {
         sx={{
           px: { xs: 1, sm: 2 },
           py: 3,
-          pb: { xs: 12, sm: 11 },
+          // ✅ NUEVO: ajusta el padding bottom en móvil según si hay login bar
+          pb: { xs: showLoginBarOnMobile ? 10 : 12, sm: 11 },
         }}
       >
         {loading ? (
@@ -1240,16 +1319,21 @@ export default function ProductDetailsPage() {
                     (informativo)
                   </Typography>
 
-                  <BottomActionBar
-                    cartSaving={cartSaving}
-                    disableColorRequired={disableColorRequired}
-                    comprarahora={comprarahora}
-                    addToCart={addToCart}
-                    wishOn={wishOn}
-                    toggleFavoriteFS={toggleFavoriteFS}
-                    favBusy={favBusy}
-                    onShare={onShare}
-                  />
+                  {/* ✅ CAMBIO: en móvil sin user mostramos botón disabled fijo */}
+                  {showLoginBarOnMobile ? (
+                    <BottomLoginBar text="Inicia sesión para comprar" />
+                  ) : (
+                    <BottomActionBar
+                      cartSaving={cartSaving}
+                      disableColorRequired={disableColorRequired}
+                      comprarahora={comprarahora}
+                      addToCart={addToCart}
+                      wishOn={wishOn}
+                      toggleFavoriteFS={toggleFavoriteFS}
+                      favBusy={favBusy}
+                      onShare={onShare}
+                    />
+                  )}
 
                   <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
                     <Chip icon={<VerifiedUserIcon />} label="Compra protegida" />

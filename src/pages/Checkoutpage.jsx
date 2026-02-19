@@ -188,6 +188,9 @@ export default function CheckoutPage() {
     return [];
   }, [buyNowItem, selectedIds, cart.items, webviewItems]);
 
+
+  console.log(itemsToPay, 'estamos')
+
   const [hasPurchases, setHasPurchases] = useState(null);
 
   useEffect(() => {
