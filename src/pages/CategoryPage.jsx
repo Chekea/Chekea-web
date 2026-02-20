@@ -30,7 +30,15 @@ const SubcategoryBar = lazy(() => import("../components/subcategorybar"));
 const PAGE_SIZE = 12;
 
 const SUBCATS_BY_CAT = {
-  "Moda & Accesorios": ["Vestidos", "Calzado", "Bolsos", "Trajes", "Pantalones", "Camisas", "Otros"],
+  "Moda & Accesorios": [
+    "Vestidos",
+    "Calzado",
+    "Bolsos",
+    "Trajes",
+    "Pantalones",
+    "Camisas",
+    "Otros",
+  ],
   "Belleza & Accesorios": ["Maquillaje", "Pelo", "Joyas", "Otros"],
   "Complementos para peques": ["Bebés", "Niños", "Moda", "Otros"],
   Hogar: ["Cocina", "Decoración", "Baño", "Sala de estar", "Dormitorio", "Iluminacion"],
@@ -74,7 +82,27 @@ function cacheSet(key, value) {
   }
 }
 
-/* ==================== Persistencia ==================== */
+/* ==================== VIEW SNAPSHOT CACHE (para back) ==================== */
+const VIEW_CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
+const viewCache = new Map();
+
+function makeViewKey(category, subcat, sort, page) {
+  return `VIEW__${category}__${subcat}__${sort}__p${page}`;
+}
+function viewCacheGet(key) {
+  const hit = viewCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.ts > VIEW_CACHE_TTL_MS) {
+    viewCache.delete(key);
+    return null;
+  }
+  return hit;
+}
+function viewCacheSet(key, value) {
+  viewCache.set(key, value);
+}
+
+/* ==================== Persistencia (web normal) ==================== */
 const LAST_STATE_STORAGE_KEY = "categoryPage:lastState";
 const LAST_DOC_ID_BY_CTX_KEY = "categoryPage:lastDocIdByCtx";
 
@@ -121,16 +149,37 @@ function clearLastDocIdForCtx(ctxKey) {
   writeLastDocIdMap(map);
 }
 
+/* ==================== RN WebView Bridge (opcional) ==================== */
+const RN_BRIDGE_NS = "RN_BRIDGE_V1";
+
+function isRNWebView() {
+  return typeof window !== "undefined" && !!window.ReactNativeWebView;
+}
+function rnPost(type, payload) {
+  if (!isRNWebView()) return;
+  try {
+    window.ReactNativeWebView.postMessage(
+      JSON.stringify({ ns: RN_BRIDGE_NS, type, payload, ts: Date.now() })
+    );
+  } catch {}
+}
+function rnGetLastDocIdForCtx(ctxKey) {
+  try {
+    return window.__RN_PERSIST__?.lastDocIdByCtx?.[ctxKey] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export default function CategoryPage() {
   const { t, i18n } = useTranslation();
   const nav = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // ✅ Desktop detection
   const theme = useTheme();
   const isDesktop = useMediaQuery(theme.breakpoints.up("md"));
 
-  // ✅ Importa Header solo en desktop (en móvil NO se descarga)
+  // ✅ Header solo desktop
   const [HeaderComp, setHeaderComp] = useState(null);
   useEffect(() => {
     let mounted = true;
@@ -139,10 +188,12 @@ export default function CategoryPage() {
       return;
     }
     (async () => {
-      const mod = await import("../components/header"); // <-- el header optimizado de arriba
+      const mod = await import("../components/header");
       if (mounted) setHeaderComp(() => mod.default);
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [isDesktop]);
 
   // ✅ Congela navType al montar
@@ -168,17 +219,25 @@ export default function CategoryPage() {
   const ctxKey = useMemo(() => makeCtxKey(category, subcat, sort), [category, subcat, sort]);
   const subcatsForCat = useMemo(() => SUBCATS_BY_CAT[category] ?? [], [category]);
 
-  // ✅ updateParams estable (no depende de searchParams)
+  // ✅ Notifica a RN el contexto actual (solo WebView)
+  useEffect(() => {
+    if (!ctxKey || category === "ALL") return;
+    rnPost("CTX_CHANGED", { ctxKey, category, subcat, sort });
+  }, [ctxKey, category, subcat, sort]);
+
   const updateParams = useCallback(
     (patch) => {
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        for (const [k, v] of Object.entries(patch)) {
-          if (v === null || v === undefined) next.delete(k);
-          else next.set(k, String(v));
-        }
-        return next;
-      }, { replace: true });
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          for (const [k, v] of Object.entries(patch)) {
+            if (v === null || v === undefined) next.delete(k);
+            else next.set(k, String(v));
+          }
+          return next;
+        },
+        { replace: true }
+      );
     },
     [setSearchParams]
   );
@@ -210,7 +269,7 @@ export default function CategoryPage() {
     writeLastState({ ctxKey, cat: category, subcat, sort, p: page, ts: Date.now() });
   }, [ctxKey, category, subcat, sort, page]);
 
-  // reset si cambia contexto
+  // reset si cambia contexto (NO en POP para no romper Back)
   useEffect(() => {
     if (prevCtxRef.current === null) {
       prevCtxRef.current = ctxKey;
@@ -218,13 +277,15 @@ export default function CategoryPage() {
     }
     if (prevCtxRef.current !== ctxKey) {
       prevCtxRef.current = ctxKey;
+
+      if (entryNavType === "POP") return;
+
       lastDocsRef.current = { 1: null };
       updateParams({ p: 1 });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ctxKey]);
+  }, [ctxKey, entryNavType]);
 
-  // ✅ evita respuestas viejas
   const reqIdRef = useRef(0);
 
   useEffect(() => {
@@ -236,10 +297,40 @@ export default function CategoryPage() {
     async function load() {
       const cacheKey = makePageKey(category, subcat, sort, page);
 
+      // ✅ 1) Si venimos de BACK (POP), restaura snapshot tal cual (items + scroll) y sal
+      if (entryNavType === "POP") {
+        const vKey = makeViewKey(category, subcat, sort, page);
+        const snap = viewCacheGet(vKey);
+        if (snap) {
+          setError("");
+          setItems(snap.items ?? []);
+          setHasNext(Boolean(snap.hasNext));
+          setLoading(false);
+          if (snap.lastDocByPage) lastDocsRef.current = snap.lastDocByPage;
+
+          requestAnimationFrame(() => {
+            window.scrollTo({ top: snap.scrollY ?? 0, behavior: "auto" });
+          });
+
+          return;
+        }
+      }
+
       const isPage1 = page === 1;
-      const shouldAdvance = entryNavType === "PUSH";
+
+      // ✅ cursores: RN (WebView) tiene prioridad, si no existe usa web(sessionStorage)
+      const rnLastDocId = rnGetLastDocIdForCtx(ctxKey);
+      const webLastDocId = getLastDocIdForCtx(ctxKey);
+      const savedCursor = rnLastDocId || webLastDocId;
+
+      // ✅ Web normal: mantén PUSH / WebView: avanza en page1 si hay cursor
+      const shouldAdvance = isRNWebView()
+        ? isPage1 && !!savedCursor
+        : entryNavType === "PUSH";
+
       const bypassCache = isPage1 && shouldAdvance;
 
+      // ✅ 2) cache normal (pageCache)
       if (!bypassCache) {
         const cached = cacheGet(cacheKey);
         if (cached) {
@@ -248,6 +339,11 @@ export default function CategoryPage() {
           setHasNext(Boolean(cached.hasNext));
           setLoading(false);
           if (cached.lastDocByPage) lastDocsRef.current = cached.lastDocByPage;
+
+          // opcional: si cache trae, en PUSH scroll top, en POP ya lo manejamos arriba
+          if (entryNavType !== "POP") {
+            requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
+          }
           return;
         }
       }
@@ -257,10 +353,12 @@ export default function CategoryPage() {
 
       try {
         const lastDoc = lastDocsRef.current[page] ?? null;
-        const savedLastDocId = isPage1 && shouldAdvance && !lastDoc ? getLastDocIdForCtx(ctxKey) : null;
+
+        // ✅ usa cursor persistido solo en page 1 cuando no hay snapshot local
+        const savedLastDocId = isPage1 && shouldAdvance && !lastDoc ? savedCursor : null;
 
         let res = await getProductsPageFirestore({
-          pageSize: isDesktop? PAGE_SIZE:6,
+          pageSize: isDesktop ? PAGE_SIZE : 6,
           category,
           subcategory: subcat,
           sort,
@@ -269,11 +367,14 @@ export default function CategoryPage() {
           lastDocId: savedLastDocId,
         });
 
+        // ✅ si el cursor guardado ya no sirve, limpia en web + RN y vuelve a cargar normal
         if (isPage1 && shouldAdvance && savedLastDocId && (!res?.items || res.items.length === 0)) {
           clearLastDocIdForCtx(ctxKey);
+          rnPost("CLEAR_LASTDOC_BY_CTX", { ctxKey });
+
           lastDocsRef.current = { 1: null };
           res = await getProductsPageFirestore({
-            pageSize:  isDesktop? PAGE_SIZE:6,
+            pageSize: isDesktop ? PAGE_SIZE : 6,
             category,
             subcategory: subcat,
             sort,
@@ -290,10 +391,13 @@ export default function CategoryPage() {
         setHasNext(Boolean(res?.hasNext));
         lastDocsRef.current[page + 1] = res?.lastDoc ?? null;
 
-        if (isPage1 && shouldAdvance && res?.lastDocId) {
+        // ✅ guarda cursor (page1) -> web + RN opcional
+        if (isPage1 && res?.lastDocId) {
           setLastDocIdForCtx(ctxKey, res.lastDocId);
+          rnPost("SAVE_LASTDOC_BY_CTX", { ctxKey, lastDocId: res.lastDocId });
         }
 
+        // ✅ cache de páginas (tu cache existente)
         if (!bypassCache) {
           cacheSet(cacheKey, {
             ts: Date.now(),
@@ -302,19 +406,40 @@ export default function CategoryPage() {
             lastDocByPage: { ...lastDocsRef.current },
           });
         }
+
+        // ✅ scroll top solo cuando NO es back
+        if (entryNavType !== "POP") {
+          requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
+        }
       } catch (e) {
         console.error(e);
         if (alive && myReqId === reqIdRef.current) setError(t("loadError"));
       } finally {
         if (!alive || myReqId !== reqIdRef.current) return;
         setLoading(false);
-        if (entryNavType !== "POP") window.scrollTo({ top: 0, behavior: "auto" });
       }
     }
 
     load();
-    return () => { alive = false; };
-  }, [category, subcat, sort, page, t, ctxKey, entryNavType]);
+    return () => {
+      alive = false;
+    };
+  }, [category, subcat, sort, page, t, ctxKey, entryNavType, isDesktop]);
+
+  // ✅ Guarda snapshot de la vista (para que Back muestre igual)
+  useEffect(() => {
+    if (!category || category === "ALL") return;
+    if (loading) return;
+
+    const vKey = makeViewKey(category, subcat, sort, page);
+    viewCacheSet(vKey, {
+      ts: Date.now(),
+      items,
+      hasNext,
+      lastDocByPage: { ...lastDocsRef.current },
+      scrollY: typeof window !== "undefined" ? window.scrollY : 0,
+    });
+  }, [category, subcat, sort, page, loading, items, hasNext]);
 
   const lang = i18n.language;
   const mappedItems = useMemo(() => {
