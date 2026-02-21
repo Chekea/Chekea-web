@@ -558,7 +558,7 @@ export default function VerifyUploadPage() {
             </Typography>
 
             <Stack spacing={1}>
-              <Typography>1) Abre tu app y selecciona “Ingreso”.</Typography>
+              <Typography>1) Acuda al banco y haga el Ingreso.</Typography>
 
               <Alert severity="info" sx={{ mb: 0.5 }}>
                 Por seguridad, los datos de ingreso están ocultos. Pulsa{" "}

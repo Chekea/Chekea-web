@@ -59,6 +59,7 @@ import { useEffectiveAuth } from "../state/useEffectiveAuth";
 
 /* ✅ Lazy-load de componentes pesados */
 const ProductGrid = lazy(() => import("../components/productgrid"));
+const Header = lazy(() => import("../components/header"));
 
 /* -------------------- helpers -------------------- */
 const LS_RECENTS = "chekea_recently_viewed_v1";
@@ -73,9 +74,7 @@ function readHasPurchasedForUser(uid) {
   try {
     const raw = sessionStorage.getItem(HAS_PURCHASED_SESSION_KEY);
     const map = raw ? JSON.parse(raw) : {};
-    return Object.prototype.hasOwnProperty.call(map, uid)
-      ? Boolean(map[uid])
-      : null;
+    return Object.prototype.hasOwnProperty.call(map, uid) ? Boolean(map[uid]) : null;
   } catch {
     return null;
   }
@@ -139,7 +138,7 @@ function addRecentlyViewed(productId) {
 
 function shippingDuration(city, method) {
   if (method === "SEA") return { type: "MONTHS", months: 3 };
-  const days = city === "Bata" ? 25 : 19;
+  const days = city === "Bata" ? 20 : 18;
   return { type: "DAYS", days };
 }
 function formatDuration(d) {
@@ -167,7 +166,7 @@ function getStylePrice(style) {
 
 /* -------------------- envío estimado -------------------- */
 const AIR_PRICE_PER_KG = 9000;
-const AIR_PRICE_PER_KG_BATA = 16000;
+const AIR_PRICE_PER_KG_BATA = 13000;
 
 const PESOS = [
   { nombre: "Ultraligero", min: 0.1, max: 0.5 },
@@ -210,15 +209,7 @@ function estimateShippingFromProduct(city, { method, pesoTipo, dimensionTipo, qt
         ? Math.round(mid * AIR_PRICE_PER_KG * q)
         : Math.round(mid * AIR_PRICE_PER_KG_BATA * q);
 
-    return {
-      mode: "AIR",
-      label: found.nombre,
-      unit: "kg",
-      minValue: found.min,
-      maxValue: found.max,
-      midValue: mid,
-      estimated,
-    };
+    return { mode: "AIR", label: found.nombre, estimated };
   }
 
   const key = normKey(dimensionTipo);
@@ -228,15 +219,7 @@ function estimateShippingFromProduct(city, { method, pesoTipo, dimensionTipo, qt
   const mid = (found.min + found.max) / 2;
   const estimated = Math.round(mid * SEA_PRICE_PER_CBM * q);
 
-  return {
-    mode: "SEA",
-    label: found.nombre,
-    unit: "cbm",
-    minValue: found.min,
-    maxValue: found.max,
-    midValue: mid,
-    estimated,
-  };
+  return { mode: "SEA", label: found.nombre, estimated };
 }
 
 /* -------------------- YouTube (lazy: solo si hay id) -------------------- */
@@ -363,17 +346,19 @@ function StickyPromoSMS({
   );
 }
 
-/* BottomActionBar igual que el tuyo (lo dejo tal cual) */
-function BottomActionBar({
-  cartSaving,
-  disableColorRequired,
-  comprarahora,
-  addToCart,
-  wishOn,
-  toggleFavoriteFS,
-  favBusy,
-  onShare,
-}) {
+/* BottomActionBar igual que el tuyo (sin cambios) */
+function BottomActionBar(props) {
+  const {
+    cartSaving,
+    disableColorRequired,
+    comprarahora,
+    addToCart,
+    wishOn,
+    toggleFavoriteFS,
+    favBusy,
+    onShare,
+  } = props;
+
   return (
     <Box
       sx={{
@@ -455,7 +440,6 @@ function BottomActionBar({
   );
 }
 
-/* ✅ NUEVO: Barra inferior SOLO móvil cuando NO hay usuario logueado */
 function BottomLoginBar({ text = "Inicia sesión para comprar" }) {
   return (
     <Box
@@ -475,17 +459,19 @@ function BottomLoginBar({ text = "Inicia sesión para comprar" }) {
       }}
     >
       <Box sx={{ maxWidth: 980, mx: "auto" }}>
-        <Button
-          fullWidth
-          variant="contained"
-          disabled
-          sx={{ height: 44, fontWeight: 900 }}
-        >
+        <Button fullWidth variant="contained" disabled sx={{ height: 44, fontWeight: 900 }}>
           {text}
         </Button>
       </Box>
     </Box>
   );
+}
+
+// ✅ helper para tareas diferibles
+function idle(cb) {
+  if (typeof window === "undefined") return;
+  if ("requestIdleCallback" in window) return window.requestIdleCallback(cb, { timeout: 1200 });
+  return window.setTimeout(cb, 250);
 }
 
 export default function ProductDetailsPage() {
@@ -496,28 +482,12 @@ export default function ProductDetailsPage() {
   const theme = useTheme();
   const isDesktop = useMediaQuery(theme.breakpoints.up("md"));
 
-  // ✅ Header: solo desktop y no se descarga en móvil
-  const [HeaderComp, setHeaderComp] = useState(null);
-  useEffect(() => {
-    let mounted = true;
-    if (!isDesktop) {
-      setHeaderComp(null);
-      return;
-    }
-    (async () => {
-      const mod = await import("../components/header");
-      if (mounted) setHeaderComp(() => mod.default);
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [isDesktop]);
-
+  // ✅ cart/auth
   const cart = useCart();
   const auth = useEffectiveAuth();
   const userId = auth?.user ? auth.user.uid : null;
 
-  // ✅ NUEVO: condición para mostrar CTA disabled en móvil si NO hay sesión
+  // ✅ condición para CTA disabled en móvil si NO hay sesión
   const showLoginBarOnMobile = !isDesktop && !userId;
 
   const [hasPurchased, setHasPurchased] = useState(null);
@@ -525,39 +495,57 @@ export default function ProductDetailsPage() {
     setHasPurchased(readHasPurchasedForUser(userId));
   }, [userId]);
 
+  // data state
   const [product, setProduct] = useState(null);
   const [related, setRelated] = useState([]);
   const [colors, setColors] = useState([]);
   const [styles, setStyles] = useState([]);
   const [images, setImages] = useState([]);
 
+  // selections
   const [selectedColor, setSelectedColor] = useState(null);
   const [selectedStyle, setSelectedStyle] = useState(null);
   const [activeImage, setActiveImage] = useState(null);
 
+  // shipping & qty
   const [shipCity, setShipCity] = useState(loadShipCity());
   const [shipMethod, setShipMethod] = useState(loadShipMethod());
   const [qty, setQty] = useState(1);
 
+  // favorites
   const [wishOn, setWishOn] = useState(false);
   const [favoritoId, setFavoritoId] = useState("");
   const [favBusy, setFavBusy] = useState(false);
 
+  // ui flags
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
-
   const [cartSaving, setCartSaving] = useState(false);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
 
   useEffect(() => saveShipCity(shipCity), [shipCity]);
   useEffect(() => saveShipMethod(shipMethod), [shipMethod]);
 
+  // ✅ Preload header solo en desktop (idle)
+  useEffect(() => {
+    if (!isDesktop) return;
+    const idd = idle(() => import("../components/header"));
+    return () => {
+      if (typeof window === "undefined") return;
+      if ("cancelIdleCallback" in window && typeof idd === "number") {
+        try {
+          window.cancelIdleCallback(idd);
+        } catch {}
+      } else if (typeof idd === "number") clearTimeout(idd);
+    };
+  }, [isDesktop]);
+
   const productKey = useMemo(() => {
     if (!product) return id ?? null;
     return product.Codigo ?? product.id ?? id ?? null;
   }, [product, id]);
 
-  // ✅ Protege contra responses viejas (cambio de id rápido)
+  // ✅ Protege contra responses viejas
   const reqIdRef = useRef(0);
 
   /* -------------------- load product (CACHE + SWR) -------------------- */
@@ -580,8 +568,8 @@ export default function ProductDetailsPage() {
     const hydrate = ({ p, c, s, imgs, rel }) => {
       if (!alive || myReqId !== reqIdRef.current) return;
 
-      setLoading(false);
       setErr("");
+      setLoading(false);
 
       setProduct(p);
       setColors(c ?? []);
@@ -604,10 +592,11 @@ export default function ProductDetailsPage() {
       const cacheKey = `${CACHE_PREFIX}product_bundle:${id}`;
       const cached = cacheGet(cacheKey);
 
+      // ✅ 1) Si hay cache, pinta INMEDIATO y refresca SWR en background
       if (cached?.value) {
         hydrate(cached.value);
 
-        // SWR refresh (sin bloquear la UI)
+        // refresco SWR (no bloquea UI)
         try {
           const p2 = await getProductByIdFS(id);
           if (!alive || myReqId !== reqIdRef.current || !p2) return;
@@ -636,6 +625,7 @@ export default function ProductDetailsPage() {
         return;
       }
 
+      // ✅ 2) Sin cache: loader + fetch paralelo
       setLoading(true);
       resetUI();
 
@@ -684,21 +674,27 @@ export default function ProductDetailsPage() {
     };
   }, [id]);
 
-  /* -------------------- view count (1 por sesión) -------------------- */
+  /* -------------------- view count (1 por sesión) - diferido -------------------- */
   useEffect(() => {
     if (!productKey) return;
 
-    (async () => {
+    const job = () => {
       const viewKey = `${SS_VIEW_PREFIX}${productKey}`;
       if (sessionStorage.getItem(viewKey)) return;
 
       sessionStorage.setItem(viewKey, "1");
-      try {
-        await updateViewCountFS(productKey);
-      } catch (e) {
-        console.error("updateViewCountFS failed:", e);
-      }
-    })();
+      updateViewCountFS(productKey).catch((e) => console.error("updateViewCountFS failed:", e));
+    };
+
+    const idd = idle(job);
+    return () => {
+      if (typeof window === "undefined") return;
+      if ("cancelIdleCallback" in window && typeof idd === "number") {
+        try {
+          window.cancelIdleCallback(idd);
+        } catch {}
+      } else if (typeof idd === "number") clearTimeout(idd);
+    };
   }, [productKey]);
 
   /* -------------------- leer favorito existente -------------------- */
@@ -741,7 +737,6 @@ export default function ProductDetailsPage() {
 
     const rawTitle = product.Titulo ?? product.title ?? "";
     const rawDetails = product.Detalles ?? product.description ?? "";
-    const vendedor = product.Vendedor;
 
     const discount = Number(product.Descuento ?? product.discount ?? 0);
     const productPrice = Number(product.Precio ?? product.price ?? 0);
@@ -772,8 +767,6 @@ export default function ProductDetailsPage() {
       qty,
     });
 
-    const shipEstimate = ship?.estimated ?? null;
-
     const imgreal = Boolean(product.Imgreal ?? product.imgreal ?? false);
     const imagenesrealesRaw =
       product.ireal ??
@@ -794,8 +787,8 @@ export default function ProductDetailsPage() {
       _details: rawDetails,
       _finalPrice: finalPrice,
       shipDurationText: formatDuration(duration),
-      vendedor,
-      shipEstimate,
+      vendedor: product.Vendedor,
+      shipEstimate: ship?.estimated ?? null,
       rating: product.Rating ?? product.rating ?? "4.0",
       _productKey: productKey,
       imgreal,
@@ -815,11 +808,18 @@ export default function ProductDetailsPage() {
     }));
   }, [related, i18n.language]);
 
-  // ✅ Prefetch de ProductGrid cuando ya sabemos que lo podríamos usar
+  // ✅ Prefetch de ProductGrid SOLO si habrá relacionados (idle)
   useEffect(() => {
-    if (mappedRelated.length > 0) {
-      import("../components/productgrid");
-    }
+    if (mappedRelated.length === 0) return;
+    const idd = idle(() => import("../components/productgrid"));
+    return () => {
+      if (typeof window === "undefined") return;
+      if ("cancelIdleCallback" in window && typeof idd === "number") {
+        try {
+          window.cancelIdleCallback(idd);
+        } catch {}
+      } else if (typeof idd === "number") clearTimeout(idd);
+    };
   }, [mappedRelated.length]);
 
   /* -------------------- favorites toggle (Firestore) -------------------- */
@@ -966,10 +966,7 @@ export default function ProductDetailsPage() {
       selectedStyle
         ? `Estilo: ${
             selectedStyle.nombre ??
-            selectedStyle.name ??
-            selectedStyle.label ??
-            selectedStyle.Nombre ??
-            ""
+            selectedStyle.name ?? selectedStyle.label ?? selectedStyle.Nombre ?? ""
           }`
         : null,
     ]
@@ -1017,10 +1014,16 @@ export default function ProductDetailsPage() {
     return txt.length > 160;
   }, [mapped?._details]);
 
+  const qtyOptions = useMemo(() => Array.from({ length: 9 }, (_, i) => i + 1), []);
+
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
-      {/* ✅ Header solo desktop */}
-      {isDesktop && HeaderComp ? <HeaderComp queryText="" onQueryChange={() => {}} /> : null}
+      {/* ✅ Header solo desktop, lazy (sin state/effect extra) */}
+      {isDesktop ? (
+        <Suspense fallback={null}>
+          <Header queryText="" onQueryChange={() => {}} />
+        </Suspense>
+      ) : null}
 
       {hasPurchased === false && (
         <StickyPromoSMS
@@ -1041,7 +1044,6 @@ export default function ProductDetailsPage() {
         sx={{
           px: { xs: 1, sm: 2 },
           py: 3,
-          // ✅ NUEVO: ajusta el padding bottom en móvil según si hay login bar
           pb: { xs: showLoginBarOnMobile ? 10 : 12, sm: 11 },
         }}
       >
@@ -1051,6 +1053,7 @@ export default function ProductDetailsPage() {
           <Alert severity="error">{err}</Alert>
         ) : mapped ? (
           <>
+            {/* --- TU UI EXACTA (sin cambios) --- */}
             <Paper elevation={0} sx={{ p: { xs: 2, md: 3 }, borderRadius: 3 }}>
               <Box
                 sx={{
@@ -1136,7 +1139,6 @@ export default function ProductDetailsPage() {
                     </Paper>
                   )}
 
-                  {/* ✅ Solo render si hay video */}
                   <YouTubeEmbed videoId={mapped.youtubeId} title={mapped._title} />
                 </Box>
 
@@ -1165,7 +1167,6 @@ export default function ProductDetailsPage() {
                     <Chip size="small" label="Envío África" variant="outlined" />
                   </Stack>
 
-                  {/* Detalles */}
                   <Box sx={{ mt: 1 }}>
                     <Typography
                       sx={{
@@ -1193,7 +1194,6 @@ export default function ProductDetailsPage() {
 
                   <Divider sx={{ my: 2 }} />
 
-                  {/* Color */}
                   {colors.length > 0 && (
                     <>
                       <Typography sx={{ mt: 2, fontWeight: 800 }}>Color</Typography>
@@ -1225,7 +1225,6 @@ export default function ProductDetailsPage() {
                     </>
                   )}
 
-                  {/* Estilo */}
                   {styles.length > 0 && (
                     <>
                       <Typography sx={{ mt: 2, fontWeight: 800 }}>Tallas</Typography>
@@ -1251,7 +1250,6 @@ export default function ProductDetailsPage() {
                     </>
                   )}
 
-                  {/* Cantidad */}
                   <Box sx={{ mt: 2 }}>
                     <Typography sx={{ fontWeight: 800 }}>Cantidad (máx. 9)</Typography>
                     <TextField
@@ -1261,18 +1259,14 @@ export default function ProductDetailsPage() {
                       onChange={(e) => setQty(Number(e.target.value))}
                       sx={{ mt: 1, width: 140 }}
                     >
-                      {Array.from({ length: 9 }).map((_, i) => {
-                        const v = i + 1;
-                        return (
-                          <MenuItem key={v} value={v}>
-                            {v}
-                          </MenuItem>
-                        );
-                      })}
+                      {qtyOptions.map((v) => (
+                        <MenuItem key={v} value={v}>
+                          {v}
+                        </MenuItem>
+                      ))}
                     </TextField>
                   </Box>
 
-                  {/* Ciudad */}
                   <Typography sx={{ mt: 2, fontWeight: 800 }}>Ciudad de entrega</Typography>
                   <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
                     <Chip
@@ -1287,7 +1281,6 @@ export default function ProductDetailsPage() {
                     />
                   </Stack>
 
-                  {/* Tipo de envío */}
                   <Typography sx={{ mt: 2, fontWeight: 800 }}>Tipo de envío</Typography>
                   <ToggleButtonGroup
                     value={shipMethod}
@@ -1301,7 +1294,6 @@ export default function ProductDetailsPage() {
                     </ToggleButton>
                   </ToggleButtonGroup>
 
-                  {/* Envío info */}
                   <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
                     <LocalShippingIcon fontSize="small" />
                     <Typography sx={{ color: "text.secondary" }}>
@@ -1319,13 +1311,12 @@ export default function ProductDetailsPage() {
                     (informativo)
                   </Typography>
 
-                  {/* ✅ CAMBIO: en móvil sin user mostramos botón disabled fijo */}
                   {showLoginBarOnMobile ? (
                     <BottomLoginBar text="Inicia sesión para comprar" />
                   ) : (
                     <BottomActionBar
                       cartSaving={cartSaving}
-                      disableColorRequired={disableColorRequired}
+                      disableColorRequired={colors.length > 0 && !selectedColor}
                       comprarahora={comprarahora}
                       addToCart={addToCart}
                       wishOn={wishOn}
@@ -1347,7 +1338,7 @@ export default function ProductDetailsPage() {
               </Box>
             </Paper>
 
-            {/* ✅ Relacionados: lazy-load ProductGrid solo si hay data */}
+            {/* ✅ Relacionados: lazy-load solo si hay data */}
             {mappedRelated.length > 0 && (
               <Paper elevation={0} sx={{ mt: 2, p: 2, borderRadius: 3 }}>
                 <Typography variant="h6" sx={{ fontWeight: 900, mb: 2 }}>

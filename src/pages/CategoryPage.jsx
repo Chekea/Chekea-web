@@ -1,3 +1,4 @@
+// src/pages/CategoryPage.jsx
 import React, {
   useCallback,
   useEffect,
@@ -6,6 +7,7 @@ import React, {
   useState,
   lazy,
   Suspense,
+  memo,
 } from "react";
 
 import Container from "@mui/material/Container";
@@ -25,7 +27,7 @@ import { useNavigate, useSearchParams, useNavigationType } from "react-router-do
 import { getProductsPageFirestore } from "../services/product.firesore.service";
 
 const ProductGrid = lazy(() => import("../components/productgrid"));
-const SubcategoryBar = lazy(() => import("../components/subcategorybar"));
+const Header = lazy(() => import("../components/header"));
 
 const PAGE_SIZE = 12;
 
@@ -70,6 +72,7 @@ function cacheGet(key) {
     pageCache.delete(key);
     return null;
   }
+  // LRU bump
   pageCache.delete(key);
   pageCache.set(key, hit);
   return hit;
@@ -171,6 +174,63 @@ function rnGetLastDocIdForCtx(ctxKey) {
   }
 }
 
+/* ==================== idle preload ==================== */
+function idle(cb) {
+  if (typeof window === "undefined") return;
+  if ("requestIdleCallback" in window) return window.requestIdleCallback(cb, { timeout: 1200 });
+  return window.setTimeout(cb, 250);
+}
+
+/* ✅ SubcategoryBar SOLO se descargará si isDesktop === true */
+function lazyIfDesktop(isDesktop) {
+  return isDesktop ? lazy(() => import("../components/subcategorybar")) : null;
+}
+
+/* ✅ HERO SOLO DESKTOP (Paper + SubcategoryBar) */
+const DesktopCategoryHero = memo(function DesktopCategoryHero({
+  category,
+  subcat,
+  t,
+  subcatsForCat,
+  DesktopSubcategoryBar,
+  onChangeSubcat,
+}) {
+  // ✅ en móvil ni render ni carga del componente
+  if (!DesktopSubcategoryBar) return null;
+
+  return (
+    <Paper
+      elevation={0}
+      sx={{
+        p: 3,
+        borderRadius: 4,
+        mb: 2,
+        background: "linear-gradient(135deg, rgba(15,93,58,0.12), rgba(242,201,76,0.18))",
+      }}
+    >
+      <Typography variant="h5" sx={{ fontWeight: 900 }}>
+        {category}
+      </Typography>
+
+      <Typography sx={{ color: "text.secondary" }}>
+        {subcat === "ALL" ? t("deals") : subcat}
+      </Typography>
+
+      {subcatsForCat.length > 0 && (
+        <Box sx={{ mt: 1.5 }}>
+          <Suspense fallback={null}>
+            <DesktopSubcategoryBar
+              value={subcat}
+              options={["ALL", ...subcatsForCat]}
+              onChange={onChangeSubcat}
+            />
+          </Suspense>
+        </Box>
+      )}
+    </Paper>
+  );
+});
+
 export default function CategoryPage() {
   const { t, i18n } = useTranslation();
   const nav = useNavigate();
@@ -179,24 +239,7 @@ export default function CategoryPage() {
   const theme = useTheme();
   const isDesktop = useMediaQuery(theme.breakpoints.up("md"));
 
-  // ✅ Header solo desktop
-  const [HeaderComp, setHeaderComp] = useState(null);
-  useEffect(() => {
-    let mounted = true;
-    if (!isDesktop) {
-      setHeaderComp(null);
-      return;
-    }
-    (async () => {
-      const mod = await import("../components/header");
-      if (mounted) setHeaderComp(() => mod.default);
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [isDesktop]);
-
-  // ✅ Congela navType al montar
+  // ✅ navType congelado al montar
   const navType = useNavigationType();
   const entryNavTypeRef = useRef(null);
   if (entryNavTypeRef.current === null) entryNavTypeRef.current = navType;
@@ -219,22 +262,58 @@ export default function CategoryPage() {
   const ctxKey = useMemo(() => makeCtxKey(category, subcat, sort), [category, subcat, sort]);
   const subcatsForCat = useMemo(() => SUBCATS_BY_CAT[category] ?? [], [category]);
 
-  // ✅ Notifica a RN el contexto actual (solo WebView)
+  // ✅ SubcategoryBar solo desktop (no baja chunk en móvil)
+  const DesktopSubcategoryBar = useMemo(() => lazyIfDesktop(isDesktop), [isDesktop]);
+
+  // ✅ Preload chunks en idle (reduce lag)
+  useEffect(() => {
+    const id = idle(() => {
+      import("../components/productgrid");
+      if (isDesktop) {
+        import("../components/header");
+        import("../components/subcategorybar");
+      }
+    });
+    return () => {
+      if (typeof window === "undefined") return;
+      if ("cancelIdleCallback" in window && typeof id === "number") {
+        try {
+          window.cancelIdleCallback(id);
+        } catch {}
+      } else if (typeof id === "number") clearTimeout(id);
+    };
+  }, [isDesktop]);
+
+  // ✅ RN: notifica contexto
   useEffect(() => {
     if (!ctxKey || category === "ALL") return;
     rnPost("CTX_CHANGED", { ctxKey, category, subcat, sort });
   }, [ctxKey, category, subcat, sort]);
 
+  // ✅ updateParams: si no cambia, no replace (menos renders)
   const updateParams = useCallback(
     (patch) => {
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev);
+          let changed = false;
+
           for (const [k, v] of Object.entries(patch)) {
-            if (v === null || v === undefined) next.delete(k);
-            else next.set(k, String(v));
+            if (v === null || v === undefined) {
+              if (next.has(k)) {
+                next.delete(k);
+                changed = true;
+              }
+            } else {
+              const sv = String(v);
+              if (next.get(k) !== sv) {
+                next.set(k, sv);
+                changed = true;
+              }
+            }
           }
-          return next;
+
+          return changed ? next : prev;
         },
         { replace: true }
       );
@@ -269,7 +348,7 @@ export default function CategoryPage() {
     writeLastState({ ctxKey, cat: category, subcat, sort, p: page, ts: Date.now() });
   }, [ctxKey, category, subcat, sort, page]);
 
-  // reset si cambia contexto (NO en POP para no romper Back)
+  // reset si cambia contexto (NO en POP)
   useEffect(() => {
     if (prevCtxRef.current === null) {
       prevCtxRef.current = ctxKey;
@@ -277,7 +356,6 @@ export default function CategoryPage() {
     }
     if (prevCtxRef.current !== ctxKey) {
       prevCtxRef.current = ctxKey;
-
       if (entryNavType === "POP") return;
 
       lastDocsRef.current = { 1: null };
@@ -297,7 +375,7 @@ export default function CategoryPage() {
     async function load() {
       const cacheKey = makePageKey(category, subcat, sort, page);
 
-      // ✅ 1) Si venimos de BACK (POP), restaura snapshot tal cual (items + scroll) y sal
+      // BACK: snapshot
       if (entryNavType === "POP") {
         const vKey = makeViewKey(category, subcat, sort, page);
         const snap = viewCacheGet(vKey);
@@ -311,26 +389,22 @@ export default function CategoryPage() {
           requestAnimationFrame(() => {
             window.scrollTo({ top: snap.scrollY ?? 0, behavior: "auto" });
           });
-
           return;
         }
       }
 
       const isPage1 = page === 1;
 
-      // ✅ cursores: RN (WebView) tiene prioridad, si no existe usa web(sessionStorage)
       const rnLastDocId = rnGetLastDocIdForCtx(ctxKey);
       const webLastDocId = getLastDocIdForCtx(ctxKey);
       const savedCursor = rnLastDocId || webLastDocId;
 
-      // ✅ Web normal: mantén PUSH / WebView: avanza en page1 si hay cursor
       const shouldAdvance = isRNWebView()
         ? isPage1 && !!savedCursor
         : entryNavType === "PUSH";
 
       const bypassCache = isPage1 && shouldAdvance;
 
-      // ✅ 2) cache normal (pageCache)
       if (!bypassCache) {
         const cached = cacheGet(cacheKey);
         if (cached) {
@@ -340,7 +414,6 @@ export default function CategoryPage() {
           setLoading(false);
           if (cached.lastDocByPage) lastDocsRef.current = cached.lastDocByPage;
 
-          // opcional: si cache trae, en PUSH scroll top, en POP ya lo manejamos arriba
           if (entryNavType !== "POP") {
             requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
           }
@@ -353,8 +426,6 @@ export default function CategoryPage() {
 
       try {
         const lastDoc = lastDocsRef.current[page] ?? null;
-
-        // ✅ usa cursor persistido solo en page 1 cuando no hay snapshot local
         const savedLastDocId = isPage1 && shouldAdvance && !lastDoc ? savedCursor : null;
 
         let res = await getProductsPageFirestore({
@@ -367,7 +438,6 @@ export default function CategoryPage() {
           lastDocId: savedLastDocId,
         });
 
-        // ✅ si el cursor guardado ya no sirve, limpia en web + RN y vuelve a cargar normal
         if (isPage1 && shouldAdvance && savedLastDocId && (!res?.items || res.items.length === 0)) {
           clearLastDocIdForCtx(ctxKey);
           rnPost("CLEAR_LASTDOC_BY_CTX", { ctxKey });
@@ -391,13 +461,11 @@ export default function CategoryPage() {
         setHasNext(Boolean(res?.hasNext));
         lastDocsRef.current[page + 1] = res?.lastDoc ?? null;
 
-        // ✅ guarda cursor (page1) -> web + RN opcional
         if (isPage1 && res?.lastDocId) {
           setLastDocIdForCtx(ctxKey, res.lastDocId);
           rnPost("SAVE_LASTDOC_BY_CTX", { ctxKey, lastDocId: res.lastDocId });
         }
 
-        // ✅ cache de páginas (tu cache existente)
         if (!bypassCache) {
           cacheSet(cacheKey, {
             ts: Date.now(),
@@ -407,7 +475,6 @@ export default function CategoryPage() {
           });
         }
 
-        // ✅ scroll top solo cuando NO es back
         if (entryNavType !== "POP") {
           requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
         }
@@ -426,7 +493,7 @@ export default function CategoryPage() {
     };
   }, [category, subcat, sort, page, t, ctxKey, entryNavType, isDesktop]);
 
-  // ✅ Guarda snapshot de la vista (para que Back muestre igual)
+  // snapshot para back
   useEffect(() => {
     if (!category || category === "ALL") return;
     if (loading) return;
@@ -471,47 +538,30 @@ export default function CategoryPage() {
     [page, hasNext, updateParams]
   );
 
-  // Prefetch del grid tras cargar
-  useEffect(() => {
-    if (!loading) import("../components/productgrid");
-  }, [loading]);
+  const onChangeSubcat = useCallback(
+    (v) => updateParams({ subcat: v, p: 1 }),
+    [updateParams]
+  );
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
       {/* ✅ Header solo desktop */}
-      {isDesktop && HeaderComp ? (
-        <HeaderComp queryText={queryText} onQueryChange={setQueryText} />
+      {isDesktop ? (
+        <Suspense fallback={null}>
+          <Header queryText={queryText} onQueryChange={setQueryText} />
+        </Suspense>
       ) : null}
 
       <Container maxWidth="lg" sx={{ px: { xs: 1, sm: 2 }, py: 3 }}>
-        <Paper
-          elevation={0}
-          sx={{
-            p: 3,
-            borderRadius: 4,
-            mb: 2,
-            background: "linear-gradient(135deg, rgba(15,93,58,0.12), rgba(242,201,76,0.18))",
-          }}
-        >
-          <Typography variant="h5" sx={{ fontWeight: 900 }}>
-            {category}
-          </Typography>
-          <Typography sx={{ color: "text.secondary" }}>
-            {subcat === "ALL" ? t("deals") : subcat}
-          </Typography>
-
-          {subcatsForCat.length > 0 && (
-            <Box sx={{ mt: 1.5 }}>
-              <Suspense fallback={null}>
-                <SubcategoryBar
-                  value={subcat}
-                  options={["ALL", ...subcatsForCat]}
-                  onChange={(v) => updateParams({ subcat: v, p: 1 })}
-                />
-              </Suspense>
-            </Box>
-          )}
-        </Paper>
+        {/* ✅ ESTA SECCIÓN AHORA SOLO DESKTOP (y SubcategoryBar no se descarga en móvil) */}
+        <DesktopCategoryHero
+          category={category}
+          subcat={subcat}
+          t={t}
+          subcatsForCat={subcatsForCat}
+          DesktopSubcategoryBar={DesktopSubcategoryBar}
+          onChangeSubcat={onChangeSubcat}
+        />
 
         {loading ? (
           <CenterLoader />
