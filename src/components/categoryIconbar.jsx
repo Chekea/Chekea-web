@@ -47,7 +47,7 @@ const CategoryIconsBar = memo(function CategoryIconsBar({
       // { label: "Jerséis y Cárdigans", cat: "Moda & Accesorios", subcat: "Otros", img: imgJerseys },
       { label: "Tacones & Sandalias", cat: "Moda & Accesorios", subcat: "Calzado", img: tacones },
              { label: "Moda Infantil", cat: "Complementos para peques", subcat: "Moda", img: infantil },
-             { label: "Recien nacidos", cat: "Complementos para peques", subcat: "Bebés", img: recien },
+             { label: "Recien nacidos", cat: "Complementos para peques", subcat: "Bebes", img: recien },
 
       { label: "Otros", cat: "Moda & Accesorios", subcat: "Otros", img: imglenceria },
              { label: "Mas belleza", cat: "Belleza & Accesorios", subcat: "Otros", img: mas },
