@@ -10,7 +10,9 @@ import {
   Alert,
   InputAdornment,
   IconButton,
+  Divider,
 } from "@mui/material";
+import GoogleIcon from "@mui/icons-material/Google";
 import { useNavigate } from "react-router-dom";
 import Header from "../components/header";
 import { useAuth } from "../state/AuthContext";
@@ -68,6 +70,18 @@ export default function LoginPage() {
     }
   };
 
+  // ✅ NUEVO: Google
+  const onGoogle = async () => {
+    setLocalErr("");
+    auth.clearError();
+    try {
+      await auth.loginWithGoogle();
+      nav("/account");
+    } catch {
+      // error ya queda en auth.error
+    }
+  };
+
   const switchMode = () => {
     setLocalErr("");
     auth.clearError();
@@ -97,6 +111,18 @@ export default function LoginPage() {
           )}
 
           <Stack spacing={2} sx={{ mt: 2 }}>
+            {/* ✅ NUEVO: Botón Google */}
+            <Button
+              variant="outlined"
+              onClick={onGoogle}
+              disabled={auth.loading}
+              startIcon={<GoogleIcon />}
+            >
+              Continuar con Google
+            </Button>
+
+            <Divider>o</Divider>
+
             {mode === "register" && (
               <TextField
                 label="Nombre"
@@ -150,11 +176,7 @@ export default function LoginPage() {
               />
             )}
 
-            <Button
-              variant="contained"
-              onClick={onSubmit}
-              disabled={!canSubmit || auth.loading}
-            >
+            <Button variant="contained" onClick={onSubmit} disabled={!canSubmit || auth.loading}>
               {auth.loading ? "Procesando..." : mode === "login" ? "Entrar" : "Registrarme"}
             </Button>
 

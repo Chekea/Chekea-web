@@ -52,6 +52,23 @@ export function AuthProvider({ children }) {
     }
   };
 
+  // ✅ NUEVO: Google Sign-In (misma lógica, mismo patrón de errores)
+  const loginWithGoogle = async () => {
+    clearError();
+    try {
+      setLoading(true);
+      const u = await authService.loginWithGooglePopup();
+      setUser(u);
+      return u;
+    } catch (e) {
+      const msg = authService.mapAuthError(e);
+      setError(msg);
+      throw new Error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const logout = async () => {
     clearError();
     try {
@@ -76,6 +93,7 @@ export function AuthProvider({ children }) {
       clearError,
       login,
       register,
+      loginWithGoogle, // ✅ nuevo
       logout,
     }),
     [user, loading, error]
