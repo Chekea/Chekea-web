@@ -1311,10 +1311,7 @@ export default function ProductDetailsPage() {
                     (informativo)
                   </Typography>
 
-                  {showLoginBarOnMobile ? (
-                    <BottomLoginBar text="Inicia sesión para comprar" />
-                  ) : (
-                    <BottomActionBar
+                  <BottomActionBar
                       cartSaving={cartSaving}
                       disableColorRequired={colors.length > 0 && !selectedColor}
                       comprarahora={comprarahora}
@@ -1324,7 +1321,6 @@ export default function ProductDetailsPage() {
                       favBusy={favBusy}
                       onShare={onShare}
                     />
-                  )}
 
                   <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
                     <Chip icon={<VerifiedUserIcon />} label="Compra protegida" />

@@ -429,7 +429,7 @@ export default function CategoryPage() {
         const savedLastDocId = isPage1 && shouldAdvance && !lastDoc ? savedCursor : null;
 
         let res = await getProductsPageFirestore({
-          pageSize: isDesktop ? PAGE_SIZE : 6,
+          pageSize: isDesktop ? PAGE_SIZE : 10,
           category,
           subcategory: subcat,
           sort,

@@ -62,52 +62,7 @@ function formatMsToHMS(ms) {
 
 console.log("MODE:", import.meta.env.MODE);
 console.log("ALL ENV:", import.meta.env,'HOLA');
-function CountdownChip({ label = "Termina en", msLeft = 0 }) {
-  return (
-    <Chip
-      variant="filled"
-      label={
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <Typography sx={{ fontSize: 12, fontWeight: 800 }}>{label}</Typography>
-          <Typography sx={{ fontFamily: "monospace", fontSize: 13, fontWeight: 900 }}>
-            {formatMsToHMS(msLeft)}
-          </Typography>
-        </Box>
-      }
-      sx={{ borderRadius: 2 }}
-    />
-  );
-}
-
-function Section({ title, subtitle, right, items, loading }) {
-  return (
-    <Paper
-      elevation={0}
-      sx={{
-        borderRadius: 4,
-        p: { xs: 2, md: 2.5 },
-        mb: 2,
-        bgcolor: "background.paper",
-      }}
-    >
-      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2 }}>
-        <Box>
-          <Typography sx={{ fontWeight: 900, fontSize: { xs: 16, sm: 18 } }}>{title}</Typography>
-          {subtitle ? (
-            <Typography sx={{ color: "text.secondary", mt: 0.25, fontSize: 13 }}>
-              {subtitle}
-            </Typography>
-          ) : null}
-        </Box>
-        {right ? <Box>{right}</Box> : null}
-      </Box>
-
-      <Box sx={{ mt: 1.5 }}>
-        <ProductGrid items={items} loading={loading && (items?.length ?? 0) === 0} />
-      </Box>
-    </Paper>
-  );
-}
+ 
 
 export default function HomePage() {
   const { t, i18n } = useTranslation();
@@ -495,22 +450,7 @@ setNewItems(res.recientes ?? []);
       <Header queryText={queryText} onQueryChange={setQueryText} onSearchClick={onSearchClick} />
 
       <Container maxWidth="lg" sx={{ px: { xs: 1, sm: 2 }, py: { xs: 2, md: 3 } }}>
-        <Paper
-          elevation={0}
-          sx={{
-            p: { xs: 2, md: 3 },
-            borderRadius: 4,
-            mb: 2,
-            background: "linear-gradient(135deg, rgba(15,93,58,0.12), rgba(242,201,76,0.18))",
-          }}
-        >
-          <Typography variant="h5" sx={{ fontWeight: 900, fontSize: { xs: 20, sm: 24, md: 28 } }}>
-            {t("brandLine")}
-          </Typography>
-          <Typography sx={{ color: "text.secondary", mt: 0.5 }}>
-            Chekea • {t("deals")} 
-          </Typography>
-        </Paper>
+       
 
         {/* ✅ Iconos tipo burbuja */}
 <CategoryIconsBar value={category} onChange={onCategoryChange} variant="grid" />
