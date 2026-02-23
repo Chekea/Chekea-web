@@ -7,6 +7,8 @@ import {
   onAuthStateChanged,
   GoogleAuthProvider,
   signInWithPopup,
+  getRedirectResult,
+  signInWithRedirect,
 } from "firebase/auth";
 
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
@@ -73,15 +75,30 @@ export const authService = {
     return mapFirebaseUser(auth.currentUser);
   },
 
-  // ✅ NUEVO: Google Sign-In (solo login, no toca Firestore)
-  async loginWithGooglePopup() {
+
+  
+async loginWithGoogle() {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: "select_account" });
+
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+    if (isMobile) {
+      // En móvil NO devuelve user aquí; redirige
+      await signInWithRedirect(auth, provider);
+      return null;
+    }
 
     const cred = await signInWithPopup(auth, provider);
     return mapFirebaseUser(cred.user);
   },
 
+  // ✅ NUEVO: completar el login después del redirect (llamar al cargar la app)
+  async completeGoogleRedirect() {
+    const result = await getRedirectResult(auth);
+    if (!result?.user) return null;
+    return mapFirebaseUser(result.user);
+  },
   async logout() {
     await signOut(auth);
   },

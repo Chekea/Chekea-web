@@ -14,6 +14,7 @@ import CheckoutPage from "../pages/Checkoutpage";
 import FavoritesPage from "../pages/FavoritePage";
 import ProductDetailsPage from "../pages/ProductDetailspage";
 import CategoryPage from "../pages/CategoryPage";
+import { authService } from "../services/auth.service";
 
 // ✅ Lazy solo para no críticas
 const HomePage = lazy(() => import("../pages/Homepage"));
@@ -38,6 +39,17 @@ export default function AppRouter({ initialRNState }) {
     const uninstall = installRnBridge();
     return uninstall;
   }, []);
+  useEffect(() => {
+  const checkRedirect = async () => {
+    const user = await authService.completeGoogleRedirect();
+    if (user) {
+      // aquí guardas el usuario en tu estado global
+      setUser(user);
+    }
+  };
+
+  checkRedirect();
+}, []);
 
   return (
     <AuthProvider>
