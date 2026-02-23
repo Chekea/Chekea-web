@@ -36,7 +36,7 @@ const ProductCard = memo(function ProductCard({ product, isFirst = false }) {
   const title = product?.Titulo ?? "";
   const category = product?.Categoria ?? "";
   const shipping = product?.shipping ?? "";
-  const rating = product?.rating ?? "4.0";
+  const rating = product?.Genero === 'Masculina' ? '5.0' : "4.0";
   const img = product?.Imagen || FALLBACK_IMG;
 
   return (

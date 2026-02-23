@@ -8,7 +8,7 @@ import imgPlus from "../assets/homeCats/tallas-grandes.png";
 import imgConjuntos from "../assets/homeCats/conjuntos.png";
 import imgAbajo from "../assets/homeCats/partes-abajo.png";
 import imgBolsos from "../assets/homeCats/bolsos.png";
-import imgHombre from "../assets/homeCats/hombre.png";
+import imgHombre from "../assets/homeCats/MASCULINA.png";
 import imglenceria from "../assets/homeCats/lenceria.png";
 import recien from "../assets/homeCats/recien.png";
 import infantil from "../assets/homeCats/infantil.png";
@@ -46,11 +46,12 @@ const CategoryIconsBar = memo(function CategoryIconsBar({
       // { label: "Niños y Bebés", cat: "Complementos para peques", subcat: "Niños", img: imgKids },
       // { label: "Jerséis y Cárdigans", cat: "Moda & Accesorios", subcat: "Otros", img: imgJerseys },
       { label: "Tacones & Sandalias", cat: "Moda & Accesorios", subcat: "Calzado", img: tacones },
-             { label: "Moda Infantil", cat: "Complementos para peques", subcat: "Moda", img: infantil },
+                   { label: "Moda Masculina", cat: "Moda & Accesorios", subcat: "Masculina", img: imgHombre },
+ 
+      { label: "Moda Infantil", cat: "Complementos para peques", subcat: "Moda", img: infantil },
              { label: "Recien nacidos", cat: "Complementos para peques", subcat: "Bebes", img: recien },
 
       { label: "Otros", cat: "Moda & Accesorios", subcat: "Otros", img: imglenceria },
-             { label: "Mas belleza", cat: "Belleza & Accesorios", subcat: "Otros", img: mas },
 
     ],
     []

@@ -83,9 +83,22 @@ export async function getProductsPageFirestore({
   const colRef = collection(db, PRODUCTS_COL);
   const constraints = [];
 
-  if (category && category !== "ALL") constraints.push(where("Categoria", "==", category));
-  if (subcategory && subcategory !== "ALL") constraints.push(where("Subcategoria", "==", subcategory));
-  if (qText) constraints.push(where("searchKeywords", "array-contains", qText));
+  if (category && category !== "ALL") {
+    constraints.push(where("Categoria", "==", category));
+  }
+
+  // ✅ condición especial para masculina
+  if (subcategory && subcategory !== "ALL") {
+    if (subcategory === "Masculina") {
+      constraints.push(where("Genero", "==", "Masculina"));
+    } else {
+      constraints.push(where("Subcategoria", "==", subcategory));
+    }
+  }
+
+  if (qText) {
+    constraints.push(where("searchKeywords", "array-contains", qText));
+  }
 
   constraints.push(orderBy(field, dir));
 
@@ -96,7 +109,9 @@ export async function getProductsPageFirestore({
     if (snap.exists()) effectiveLastDoc = snap;
   }
 
-  if (effectiveLastDoc) constraints.push(startAfter(effectiveLastDoc));
+  if (effectiveLastDoc) {
+    constraints.push(startAfter(effectiveLastDoc));
+  }
 
   constraints.push(limit(pageSize + 1));
 
@@ -109,12 +124,14 @@ export async function getProductsPageFirestore({
   const slice = docs.slice(0, pageSize);
   const items = slice.map(mapDoc);
 
-  const nextLastDoc = slice.length ? slice[slice.length - 1] : effectiveLastDoc;
+  const nextLastDoc = slice.length
+    ? slice[slice.length - 1]
+    : effectiveLastDoc;
 
   return {
     items,
     hasNext,
-    lastDoc: nextLastDoc,                 // snapshot para paginación normal
+    lastDoc: nextLastDoc, // snapshot para paginación normal
     lastDocId: nextLastDoc ? nextLastDoc.id : lastDocId, // ✅ id para persistir
   };
 }
