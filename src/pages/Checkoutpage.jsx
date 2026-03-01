@@ -1,5 +1,14 @@
 // src/pages/CheckoutPage.jsx
-import React, { useEffect, useMemo, useState, useCallback, useRef, lazy, Suspense, memo } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+  useRef,
+  lazy,
+  Suspense,
+  memo,
+} from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 
 import Container from "@mui/material/Container";
@@ -9,19 +18,26 @@ import Typography from "@mui/material/Typography";
 import Stack from "@mui/material/Stack";
 import Button from "@mui/material/Button";
 import Divider from "@mui/material/Divider";
+import TextField from "@mui/material/TextField";
+import Alert from "@mui/material/Alert";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import { useTheme } from "@mui/material/styles";
 
 import { useCart } from "../state/CartContext";
 import { puntodecimal } from "../utils/Helpers";
-import { getCurrentTimestamp, checkCompras } from "../services/compras.service";
+import {
+  getCurrentTimestamp,
+  checkCompras,
+  createReservaDualFS,
+} from "../services/compras.service";
 import { getCheckoutFromCache } from "../utils/checkoutwebview";
 import { useEffectiveAuth } from "../state/useEffectiveAuth";
 
 /* =========================
-   PERF HELPERS
+   SHIPPING CONFIG
 ========================= */
-const Header = lazy(() => import("../components/header"));
+const AIR_PRICE_PER_KG = 9000;
+const AIR_PRICE_PER_KG_BATA = 13000;
 
 function idle(cb) {
   if (typeof window === "undefined") return;
@@ -34,32 +50,78 @@ function safeNumber(v, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function calcTotalsFast(items, discountRate) {
-  let products = 0;
-  let shipping = 0;
+function normCity(s) {
+  return String(s ?? "").trim().toLowerCase();
+}
 
-  if (Array.isArray(items)) {
-    for (let i = 0; i < items.length; i++) {
-      const it = items[i];
-      const qty = Math.max(1, safeNumber(it?.qty ?? 1, 1));
-      products += safeNumber(it?.Precio ?? 0, 0) * qty;
-      shipping += safeNumber(it?.Envio ?? 0, 0);
-    }
+/**
+ * ✅ Calcula envío por item basado en:
+ * - ciudad (Malabo/Bata)
+ * - pesoKg
+ * - qty
+ */
+function calcShippingForItem(item) {
+  const city = normCity(item?.Ciudad ?? item?.city ?? "malabo");
+  const qty = Math.max(1, safeNumber(item?.qty ?? 1, 1));
+
+  // peso numérico: preferimos PesoKg; fallback Peso
+  const pesoKg =
+    safeNumber(item?.PesoKg, NaN);
+  const pesoAlt =
+    safeNumber(item?.Peso, NaN);
+
+  const weight = Number.isFinite(pesoKg) ? pesoKg : (Number.isFinite(pesoAlt) ? pesoAlt : 0);
+
+  const rate = city === "bata" ? AIR_PRICE_PER_KG_BATA : AIR_PRICE_PER_KG;
+
+  return Math.round(weight * rate * qty);
+}
+
+/**
+ * ✅ Precalcula totales + añade shipping calculado al item (sin mutar el original).
+ */
+function buildItemsWithShipping(items) {
+  const out = [];
+  let productsSubtotal = 0;
+  let shippingTotal = 0;
+
+  for (let i = 0; i < (items?.length ?? 0); i++) {
+    const it = items[i];
+    const qty = Math.max(1, safeNumber(it?.qty ?? 1, 1));
+    const price = safeNumber(it?.Precio ?? 0, 0);
+
+    const shipping = calcShippingForItem(it);
+
+    productsSubtotal += price * qty;
+    shippingTotal += shipping;
+
+    out.push({
+      ...it,
+      _qty: qty,
+      _shipping: shipping, // ✅ envío calculado (XFA)
+    });
   }
 
-  const discount = Number((products * (discountRate || 0)).toFixed(2));
-  const final = Number((products - discount + shipping).toFixed(2));
-
   return {
-    productsSubtotal: Number(products.toFixed(2)),
-    shippingTotal: Number(shipping.toFixed(2)),
-    discountAmount: discount,
-    finalTotal: final,
+    items: out,
+    productsSubtotal: Number(productsSubtotal.toFixed(2)),
+    shippingTotal: Number(shippingTotal.toFixed(2)),
   };
 }
 
+function calcFinalTotals(productsSubtotal, shippingTotal, discountRate) {
+  const discountAmount = Number((productsSubtotal * (discountRate || 0)).toFixed(2));
+  const finalTotal = Number((productsSubtotal - discountAmount + shippingTotal).toFixed(2));
+  return { discountAmount, finalTotal };
+}
+
 /* =========================
-   BOTÓN FIXED OPTIMIZADO
+   LAZY HEADER
+========================= */
+const Header = lazy(() => import("../components/header"));
+
+/* =========================
+   MOBILE BAR
 ========================= */
 const MobileFixedPayBar = memo(function MobileFixedPayBar({ visible, total, onPay, disabled }) {
   if (!visible) return null;
@@ -96,7 +158,7 @@ const MobileFixedPayBar = memo(function MobileFixedPayBar({ visible, total, onPa
             onClick={onPay}
             disabled={disabled}
           >
-            Realizar Pago (Presencial o Electronico)
+            Crear reserva (48h) y ver instrucciones
           </Button>
         </Stack>
       </Box>
@@ -105,22 +167,28 @@ const MobileFixedPayBar = memo(function MobileFixedPayBar({ visible, total, onPa
 });
 
 /* =========================
-   ITEM MEMOIZADO + UI MÁS LIMPIA
-   (misma info, menos "ruido")
+   ITEM
 ========================= */
 const CheckoutItem = memo(function CheckoutItem({ item, showRemove, onRemove }) {
-  const title = item.titulo ?? item.Titulo ?? "Producto";
-  const qty = item.qty ?? 1;
+  const title = item?.titulo ?? item?.Titulo ?? "Producto";
+  const qty = item?._qty ?? item?.qty ?? 1;
+  const shipping = item?._shipping ?? 0;
 
   return (
     <Paper sx={{ p: 2, mb: 1.25, borderRadius: 2 }}>
       <Stack direction="row" spacing={2} alignItems="center">
         <img
-          src={item.Img}
+          src={item?.Img}
           alt={title}
           loading="lazy"
           decoding="async"
-          style={{ width: 72, height: 72, borderRadius: 12, objectFit: "cover", flex: "0 0 auto" }}
+          style={{
+            width: 72,
+            height: 72,
+            borderRadius: 12,
+            objectFit: "cover",
+            flex: "0 0 auto",
+          }}
         />
 
         <Box sx={{ flex: 1, minWidth: 0 }}>
@@ -128,14 +196,12 @@ const CheckoutItem = memo(function CheckoutItem({ item, showRemove, onRemove }) 
             {title}
           </Typography>
 
-          {/* ✅ Resumen compacto */}
           <Typography sx={{ color: "text.secondary" }} variant="body2">
-            Cantidad: <b>{qty}</b> • Precio: <b>XFA {puntodecimal(item.Precio)}</b> • Envío:{" "}
-            <b>XFA {puntodecimal(item.Envio)}</b>
+            Cantidad: <b>{qty}</b> • Precio: <b>XFA {puntodecimal(item?.Precio ?? 0)}</b> • Envío:{" "}
+            <b>XFA {puntodecimal(shipping)}</b>
           </Typography>
 
-          {/* Detalles siguen ahí (solo si existen) */}
-          {item.Detalles ? (
+          {item?.Detalles ? (
             <Typography sx={{ mt: 0.5, color: "text.secondary" }} variant="body2">
               {item.Detalles}
             </Typography>
@@ -156,12 +222,12 @@ export default function CheckoutPage() {
   const cart = useCart();
   const nav = useNavigate();
   const location = useLocation();
-  const auth = useEffectiveAuth(); // ✅ web user OR rn user
+  const auth = useEffectiveAuth();
 
   const theme = useTheme();
   const isDesktop = useMediaQuery(theme.breakpoints.up("md"));
 
-  // ✅ preload header SOLO desktop (no bloquea)
+  // preload header SOLO desktop
   useEffect(() => {
     if (!isDesktop) return;
     const id = idle(() => import("../components/header"));
@@ -180,28 +246,30 @@ export default function CheckoutPage() {
   const selectedIdsArr = location.state?.selectedIds ?? [];
   const isBuyNow = Boolean(buyNowItem);
 
-  // set solo si hay ids
   const selectedIds = useMemo(() => {
     return selectedIdsArr.length ? new Set(selectedIdsArr) : null;
   }, [selectedIdsArr]);
 
-  // flujo webview: items cacheados por bridge RN (sessionStorage o window.__RN_STATE__)
+  // flujo webview
   const webviewItems = useMemo(() => {
-    if (location.state) return null; // web normal manda state → prioridad web
+    if (location.state) return null;
     return getCheckoutFromCache();
   }, [location.state]);
 
-  const itemsToPay = useMemo(() => {
+  const rawItemsToPay = useMemo(() => {
     if (buyNowItem) return [buyNowItem];
     if (selectedIds) return cart.items.filter((it) => selectedIds.has(it.id));
     if (Array.isArray(webviewItems) && webviewItems.length) return webviewItems;
     return [];
   }, [buyNowItem, selectedIds, cart.items, webviewItems]);
 
-  const [hasPurchases, setHasPurchases] = useState(null);
+  // ✅ Optimización clave: anexamos shipping calculado una sola vez
+  const computed = useMemo(() => buildItemsWithShipping(rawItemsToPay), [rawItemsToPay]);
+  const itemsToPay = computed.items;
 
-  // ✅ evita setState si desmonta
+  const [hasPurchases, setHasPurchases] = useState(null);
   const aliveRef = useRef(true);
+
   useEffect(() => {
     aliveRef.current = true;
     return () => {
@@ -209,7 +277,7 @@ export default function CheckoutPage() {
     };
   }, []);
 
-  // ✅ optimización: checkCompras no bloquea render (se hace después)
+  // checkCompras en idle
   useEffect(() => {
     const uid = auth.user?.uid;
     if (!uid) return;
@@ -228,7 +296,6 @@ export default function CheckoutPage() {
         });
     };
 
-    // en idle (o timeout) para no afectar TTI
     const id = idle(run);
 
     return () => {
@@ -244,39 +311,100 @@ export default function CheckoutPage() {
 
   const discountRate = hasPurchases === false ? 0.1 : 0;
 
-  // ✅ totales con loop rápido
-  const totals = useMemo(() => calcTotalsFast(itemsToPay, discountRate), [itemsToPay, discountRate]);
+  const totals = useMemo(() => {
+    const { discountAmount, finalTotal } = calcFinalTotals(
+      computed.productsSubtotal,
+      computed.shippingTotal,
+      discountRate
+    );
 
-  const handlePay = useCallback(() => {
+    return {
+      productsSubtotal: computed.productsSubtotal,
+      shippingTotal: computed.shippingTotal,
+      discountAmount,
+      finalTotal,
+    };
+  }, [computed.productsSubtotal, computed.shippingTotal, discountRate]);
+
+  // Datos comprador
+  const [nombre, setNombre] = useState("");
+  const [telefono, setTelefono] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [errReserve, setErrReserve] = useState("");
+
+  const nombreOk = nombre.trim().length >= 3;
+  const telefonoOk = String(telefono).trim().length >= 6;
+
+  const handleRemove = useCallback((id) => cart.remove(id), [cart]);
+
+  const showRemove = !isBuyNow && Boolean(location.state);
+  const hasItems = itemsToPay.length > 0;
+
+  const handleReserve = useCallback(async () => {
+    setErrReserve("");
+
     if (!auth.isAuthed) {
       nav("/login");
       return;
     }
+    if (!hasItems) return;
 
-    const now = getCurrentTimestamp();
+    if (!nombreOk) {
+      setErrReserve("Escribe tu nombre y apellidos.");
+      return;
+    }
+    if (!telefonoOk) {
+      setErrReserve("Escribe tu teléfono / WhatsApp.");
+      return;
+    }
 
-    nav(`/verify/${now}`, {
-      state: {
-        itemsToPay,
-        hasPurchases,
-        discountRate,
-        productsSubtotal: totals.productsSubtotal,
-        shippingTotal: totals.shippingTotal,
-        discountAmount: totals.discountAmount,
-        finalTotalToPay: totals.finalTotal,
-      },
-    });
-  }, [auth.isAuthed, nav, itemsToPay, hasPurchases, discountRate, totals]);
+    try {
+      setSubmitting(true);
 
-  const handleRemove = useCallback((id) => cart.remove(id), [cart]);
+      const compraId = getCurrentTimestamp();
 
-  const showRemove = !isBuyNow && Boolean(location.state); // solo flujo web con state
+      // ✅ guardamos los items con shipping calculado para que quede trazable
+      const compraData = itemsToPay.map((it) => ({
+        ...it,
+        Envio: it._shipping, // si tu backend espera Envio
+      }));
 
-  const hasItems = itemsToPay.length > 0;
+      await createReservaDualFS({
+        userId: auth.user.uid,
+        compraId,
+        compraData,
+        userInfo: { nombre: nombre.trim(), contacto: String(telefono).trim() },
+        descuento: totals.discountAmount,
+        total: totals.finalTotal,
+        envio: totals.shippingTotal,
+        expiresInHours: 48,
+      });
+
+      nav(`/order/${compraId}`);
+    } catch (e) {
+      setErrReserve(e?.message || "No se pudo crear la reserva. Inténtalo de nuevo.");
+    } finally {
+      setSubmitting(false);
+    }
+  }, [
+    auth.isAuthed,
+    auth.user?.uid,
+    nav,
+    hasItems,
+    nombreOk,
+    telefonoOk,
+    nombre,
+    telefono,
+    itemsToPay,
+    totals.discountAmount,
+    totals.finalTotal,
+    totals.shippingTotal,
+  ]);
+
+  const mobileDisabled = !hasItems || !auth.isAuthed || !nombreOk || !telefonoOk || submitting;
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
-      {/* ✅ Header solo desktop (lazy + Suspense) */}
       {isDesktop ? (
         <Suspense fallback={null}>
           <Header queryText="" onQueryChange={() => {}} />
@@ -286,8 +414,8 @@ export default function CheckoutPage() {
       <MobileFixedPayBar
         visible={hasItems}
         total={totals.finalTotal}
-        onPay={handlePay}
-        disabled={!hasItems}
+        onPay={handleReserve}
+        disabled={mobileDisabled}
       />
 
       <Container maxWidth="lg" sx={{ py: 3, pb: { xs: 13, md: 3 } }}>
@@ -297,14 +425,13 @@ export default function CheckoutPage() {
           </Typography>
 
           {!hasItems ? (
-            <Typography sx={{ mt: 2 }}>No hay productos seleccionados para pagar.</Typography>
+            <Typography sx={{ mt: 2 }}>No hay productos seleccionados para comprar.</Typography>
           ) : (
             <>
-              {/* ✅ UI: sección superior compacta */}
               <Box sx={{ mt: 2 }}>
                 {itemsToPay.map((item) => (
                   <CheckoutItem
-                    key={item.id ?? `${item.titulo}-${item.Precio}-${item.Img}`}
+                    key={item.id ?? `${item.Titulo}-${item.Precio}-${item.Img}`}
                     item={item}
                     showRemove={showRemove}
                     onRemove={handleRemove}
@@ -312,7 +439,33 @@ export default function CheckoutPage() {
                 ))}
               </Box>
 
-              {/* ✅ Resumen más legible y directo */}
+              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mt: 2 }}>
+                <Typography sx={{ fontWeight: 900, mb: 1 }}>Datos del comprador</Typography>
+
+                <Stack spacing={1.5}>
+                  <TextField
+                    label="Nombre y apellidos"
+                    value={nombre}
+                    onChange={(e) => setNombre(e.target.value)}
+                    fullWidth
+                    disabled={submitting}
+                  />
+                  <TextField
+                    label="Teléfono / WhatsApp"
+                    value={telefono}
+                    onChange={(e) => setTelefono(e.target.value)}
+                    fullWidth
+                    disabled={submitting}
+                  />
+
+                  {errReserve ? <Alert severity="error">{errReserve}</Alert> : null}
+
+                  <Alert severity="info">
+                    Tu pedido se reserva por <b>48 horas</b>. Se procesa cuando confirmamos el pago en oficina o banco.
+                  </Alert>
+                </Stack>
+              </Paper>
+
               <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mt: 2 }}>
                 <Stack spacing={0.5}>
                   <Box sx={{ display: "flex", justifyContent: "space-between" }}>
@@ -329,11 +482,11 @@ export default function CheckoutPage() {
                     </Typography>
                   </Box>
 
-                  {hasPurchases === false ? (
+                  {totals.discountAmount > 0 ? (
                     <>
                       <Box sx={{ display: "flex", justifyContent: "space-between" }}>
                         <Typography sx={{ fontWeight: 800, color: "success.main" }}>
-                          Descuento (10% solo productos)
+                          Descuento (solo productos)
                         </Typography>
                         <Typography sx={{ fontWeight: 900, color: "success.main" }}>
                           -XFA {puntodecimal(totals.discountAmount)}
@@ -350,13 +503,20 @@ export default function CheckoutPage() {
                     </Typography>
                   </Box>
 
-                 {isDesktop&& <Button variant="contained" fullWidth sx={{ mt: 1 }} onClick={handlePay}>
-                    Realizar Pago (Presencial o Electronico)
-                  </Button>}
+                  {isDesktop ? (
+                    <Button
+                      variant="contained"
+                      fullWidth
+                      sx={{ mt: 1, fontWeight: 900 }}
+                      onClick={handleReserve}
+                      disabled={mobileDisabled}
+                    >
+                      {submitting ? "Creando reserva..." : "Crear reserva (48h) y ver instrucciones"}
+                    </Button>
+                  ) : null}
 
-                  {/* ✅ Mensaje mínimo, sin cambiar negocio */}
                   <Typography variant="body2" sx={{ mt: 0.5, color: "text.secondary" }}>
-                    Continuarás a la verificación para subir el comprobante del pago.
+Confirmamos el costo final con usted antes del despacho para mas transparencia.                    
                   </Typography>
                 </Stack>
               </Paper>

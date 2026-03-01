@@ -57,7 +57,14 @@ import { useCart } from "../state/CartContext";
 import { puntodecimal } from "../utils/Helpers";
 import { useEffectiveAuth } from "../state/useEffectiveAuth";
 
-/* ✅ Lazy-load de componentes pesados */
+import {
+  pickCoverUrl,
+  buildCoverSrcSet,
+  getCoverUrls,
+  getGalleryUrls,
+} from "../utils/media";
+
+/* ✅ Lazy-load */
 const ProductGrid = lazy(() => import("../components/productgrid"));
 const Header = lazy(() => import("../components/header"));
 
@@ -80,10 +87,10 @@ function readHasPurchasedForUser(uid) {
   }
 }
 
-/* -------------------- SIMPLE CACHE (Memory + sessionStorage) -------------------- */
+/* -------------------- SIMPLE CACHE -------------------- */
 const CACHE_PREFIX = "chekea_cache_v1:";
-const CACHE_TTL_MS = 2 * 60 * 1000; // 2 min
-const MEM_CACHE = new Map(); // key -> { value, expiresAt }
+const CACHE_TTL_MS = 2 * 60 * 1000;
+const MEM_CACHE = new Map();
 
 function now() {
   return Date.now();
@@ -146,17 +153,6 @@ function formatDuration(d) {
   if (d.type === "MONTHS") return `${d.months} meses`;
   return `${d.days} días`;
 }
-
-function pickImgUrl(imgDoc) {
-  return (
-    imgDoc?.Image ??
-    imgDoc?.URL ??
-    imgDoc?.Imagen ??
-    imgDoc?.image ??
-    imgDoc?.url ??
-    null
-  );
-}
 function getStylePrice(style) {
   if (!style) return 0;
   const v = style.precio ?? style.Precio ?? style.price ?? style.Price ?? 0;
@@ -209,7 +205,7 @@ function estimateShippingFromProduct(city, { method, pesoTipo, dimensionTipo, qt
         ? Math.round(mid * AIR_PRICE_PER_KG * q)
         : Math.round(mid * AIR_PRICE_PER_KG_BATA * q);
 
-    return { mode: "AIR", label: found.nombre, estimated };
+    return { mode: "AIR", label: found.nombre, estimated,peso:mid };
   }
 
   const key = normKey(dimensionTipo);
@@ -219,10 +215,10 @@ function estimateShippingFromProduct(city, { method, pesoTipo, dimensionTipo, qt
   const mid = (found.min + found.max) / 2;
   const estimated = Math.round(mid * SEA_PRICE_PER_CBM * q);
 
-  return { mode: "SEA", label: found.nombre, estimated };
+  return { mode: "SEA", label: found.nombre, estimated,peso:mid  };
 }
 
-/* -------------------- YouTube (lazy: solo si hay id) -------------------- */
+/* -------------------- YouTube -------------------- */
 function YouTubeEmbed({ videoId, title = "Chekea Videos" }) {
   if (!videoId) return null;
   return (
@@ -346,7 +342,6 @@ function StickyPromoSMS({
   );
 }
 
-/* BottomActionBar igual que el tuyo (sin cambios) */
 function BottomActionBar(props) {
   const {
     cartSaving,
@@ -394,7 +389,7 @@ function BottomActionBar(props) {
             disabled={cartSaving || disableColorRequired}
             sx={{ height: { xs: 44, sm: "auto" } }}
           >
-            Comprar
+            Comprar Ahora
           </Button>
 
           <Button
@@ -440,38 +435,21 @@ function BottomActionBar(props) {
   );
 }
 
-function BottomLoginBar({ text = "Inicia sesión para comprar" }) {
-  return (
-    <Box
-      sx={{
-        position: "fixed",
-        left: 0,
-        right: 0,
-        bottom: 0,
-        bgcolor: "#fff",
-        zIndex: 20000,
-        borderTop: "1px solid",
-        borderColor: "divider",
-        boxShadow: "0 -10px 25px rgba(0,0,0,0.12)",
-        px: 1,
-        py: 1,
-        pb: "calc(env(safe-area-inset-bottom, 0px) + 10px)",
-      }}
-    >
-      <Box sx={{ maxWidth: 980, mx: "auto" }}>
-        <Button fullWidth variant="contained" disabled sx={{ height: 44, fontWeight: 900 }}>
-          {text}
-        </Button>
-      </Box>
-    </Box>
-  );
-}
-
-// ✅ helper para tareas diferibles
+// ✅ helper idle
 function idle(cb) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") return null;
   if ("requestIdleCallback" in window) return window.requestIdleCallback(cb, { timeout: 1200 });
   return window.setTimeout(cb, 250);
+}
+function cancelIdle(handle) {
+  if (typeof window === "undefined" || handle == null) return;
+  if ("cancelIdleCallback" in window && typeof handle !== "number") {
+    try {
+      window.cancelIdleCallback(handle);
+    } catch {}
+    return;
+  }
+  if (typeof handle === "number") clearTimeout(handle);
 }
 
 export default function ProductDetailsPage() {
@@ -482,12 +460,10 @@ export default function ProductDetailsPage() {
   const theme = useTheme();
   const isDesktop = useMediaQuery(theme.breakpoints.up("md"));
 
-  // ✅ cart/auth
   const cart = useCart();
   const auth = useEffectiveAuth();
   const userId = auth?.user ? auth.user.uid : null;
 
-  // ✅ condición para CTA disabled en móvil si NO hay sesión
   const showLoginBarOnMobile = !isDesktop && !userId;
 
   const [hasPurchased, setHasPurchased] = useState(null);
@@ -495,29 +471,28 @@ export default function ProductDetailsPage() {
     setHasPurchased(readHasPurchasedForUser(userId));
   }, [userId]);
 
-  // data state
   const [product, setProduct] = useState(null);
   const [related, setRelated] = useState([]);
   const [colors, setColors] = useState([]);
   const [styles, setStyles] = useState([]);
-  const [images, setImages] = useState([]);
+  const [images, setImages] = useState([]); // subcolección (defer)
 
-  // selections
   const [selectedColor, setSelectedColor] = useState(null);
   const [selectedStyle, setSelectedStyle] = useState(null);
-  const [activeImage, setActiveImage] = useState(null);
 
-  // shipping & qty
+  // ✅ active: null => cover
+  // o { kind:"gallery", id, urlDetail }
+  // o { kind:"real", url }
+  const [active, setActive] = useState(null);
+
   const [shipCity, setShipCity] = useState(loadShipCity());
   const [shipMethod, setShipMethod] = useState(loadShipMethod());
   const [qty, setQty] = useState(1);
 
-  // favorites
   const [wishOn, setWishOn] = useState(false);
   const [favoritoId, setFavoritoId] = useState("");
   const [favBusy, setFavBusy] = useState(false);
 
-  // ui flags
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [cartSaving, setCartSaving] = useState(false);
@@ -526,18 +501,11 @@ export default function ProductDetailsPage() {
   useEffect(() => saveShipCity(shipCity), [shipCity]);
   useEffect(() => saveShipMethod(shipMethod), [shipMethod]);
 
-  // ✅ Preload header solo en desktop (idle)
+  // ✅ Preload header solo desktop (idle)
   useEffect(() => {
     if (!isDesktop) return;
-    const idd = idle(() => import("../components/header"));
-    return () => {
-      if (typeof window === "undefined") return;
-      if ("cancelIdleCallback" in window && typeof idd === "number") {
-        try {
-          window.cancelIdleCallback(idd);
-        } catch {}
-      } else if (typeof idd === "number") clearTimeout(idd);
-    };
+    const h = idle(() => import("../components/header"));
+    return () => cancelIdle(h);
   }, [isDesktop]);
 
   const productKey = useMemo(() => {
@@ -545,7 +513,6 @@ export default function ProductDetailsPage() {
     return product.Codigo ?? product.id ?? id ?? null;
   }, [product, id]);
 
-  // ✅ Protege contra responses viejas
   const reqIdRef = useRef(0);
 
   /* -------------------- load product (CACHE + SWR) -------------------- */
@@ -561,7 +528,7 @@ export default function ProductDetailsPage() {
       setRelated([]);
       setSelectedColor(null);
       setSelectedStyle(null);
-      setActiveImage(null);
+      setActive(null);
       setDetailsExpanded(false);
     };
 
@@ -579,10 +546,7 @@ export default function ProductDetailsPage() {
 
       setSelectedColor((c ?? [])[0] ?? null);
       setSelectedStyle((s ?? [])[0] ?? null);
-
-      const primary = pickImgUrl(imgs?.[0]) ?? p?.Imagen ?? p?.image ?? null;
-      setActiveImage(primary);
-
+      setActive(null);
       setDetailsExpanded(false);
     };
 
@@ -592,40 +556,48 @@ export default function ProductDetailsPage() {
       const cacheKey = `${CACHE_PREFIX}product_bundle:${id}`;
       const cached = cacheGet(cacheKey);
 
-      // ✅ 1) Si hay cache, pinta INMEDIATO y refresca SWR en background
+      // ✅ 1) cache immediate + SWR refresh
       if (cached?.value) {
         hydrate(cached.value);
 
-        // refresco SWR (no bloquea UI)
+        // SWR refresh (no bloquea)
         try {
           const p2 = await getProductByIdFS(id);
           if (!alive || myReqId !== reqIdRef.current || !p2) return;
 
-          const [c2, s2, imgs2] = await Promise.all([
+          const [c2, s2] = await Promise.all([
             getProductColorsFS(p2.id),
             getProductStylesFS(p2.id),
-            getProductImagesFS(p2.id),
           ]);
-          if (!alive || myReqId !== reqIdRef.current) return;
 
           let rel2 = [];
-          if (p2.Categoria) {
+          if (p2.Subcategoria) {
             rel2 = await getRelatedProductsFS({
               category: p2.Subcategoria,
               excludeId: p2.Codigo ?? p2.id,
               pageSize: 4,
             });
           }
-          if (!alive || myReqId !== reqIdRef.current) return;
 
-          const bundle2 = { p: p2, c: c2, s: s2, imgs: imgs2, rel: rel2 };
+          const bundle2 = { p: p2, c: c2, s: s2, imgs: [], rel: rel2 };
           cacheSet(cacheKey, bundle2);
           hydrate(bundle2);
+
+          // ✅ galería en idle
+          const h = idle(async () => {
+            try {
+              const imgs2 = await getProductImagesFS(p2.id);
+              if (!alive || myReqId !== reqIdRef.current) return;
+              setImages(imgs2 ?? []);
+            } catch {}
+          });
+          // no need cancel; es breve
+          void h;
         } catch {}
         return;
       }
 
-      // ✅ 2) Sin cache: loader + fetch paralelo
+      // ✅ 2) no cache
       setLoading(true);
       resetUI();
 
@@ -641,26 +613,29 @@ export default function ProductDetailsPage() {
 
         addRecentlyViewed(p.Codigo ?? p.id ?? id);
 
-        const [c, s, imgs] = await Promise.all([
-          getProductColorsFS(p.id),
-          getProductStylesFS(p.id),
-          getProductImagesFS(p.id),
-        ]);
-        if (!alive || myReqId !== reqIdRef.current) return;
+        const [c, s] = await Promise.all([getProductColorsFS(p.id), getProductStylesFS(p.id)]);
 
         let rel = [];
-        if (p.Categoria) {
+        if (p.Subcategoria) {
           rel = await getRelatedProductsFS({
             category: p.Subcategoria,
             excludeId: p.Codigo ?? p.id,
             pageSize: 4,
           });
         }
-        if (!alive || myReqId !== reqIdRef.current) return;
 
-        const bundle = { p, c: c ?? [], s: s ?? [], imgs: imgs ?? [], rel: rel ?? [] };
+        const bundle = { p, c: c ?? [], s: s ?? [], imgs: [], rel: rel ?? [] };
         cacheSet(cacheKey, bundle);
         hydrate(bundle);
+
+        // ✅ galería diferida
+        idle(async () => {
+          try {
+            const imgs = await getProductImagesFS(p.id);
+            if (!alive || myReqId !== reqIdRef.current) return;
+            setImages(imgs ?? []);
+          } catch {}
+        });
       } catch (e) {
         if (!alive || myReqId !== reqIdRef.current) return;
         console.error(e);
@@ -674,27 +649,19 @@ export default function ProductDetailsPage() {
     };
   }, [id]);
 
-  /* -------------------- view count (1 por sesión) - diferido -------------------- */
+  /* -------------------- view count (1 por sesión) -------------------- */
   useEffect(() => {
     if (!productKey) return;
 
     const job = () => {
       const viewKey = `${SS_VIEW_PREFIX}${productKey}`;
       if (sessionStorage.getItem(viewKey)) return;
-
       sessionStorage.setItem(viewKey, "1");
       updateViewCountFS(productKey).catch((e) => console.error("updateViewCountFS failed:", e));
     };
 
-    const idd = idle(job);
-    return () => {
-      if (typeof window === "undefined") return;
-      if ("cancelIdleCallback" in window && typeof idd === "number") {
-        try {
-          window.cancelIdleCallback(idd);
-        } catch {}
-      } else if (typeof idd === "number") clearTimeout(idd);
-    };
+    const h = idle(job);
+    return () => cancelIdle(h);
   }, [productKey]);
 
   /* -------------------- leer favorito existente -------------------- */
@@ -714,9 +681,9 @@ export default function ProductDetailsPage() {
         const fav = await getFavoriteRefFromProductFS({ userId, productId: productKey });
         if (!alive) return;
 
-        if (fav?.id) {
+        if (fav?.id || fav?.idDoc) {
           setWishOn(true);
-          setFavoritoId(fav.id);
+          setFavoritoId(fav.id ?? fav.idDoc ?? "");
         } else {
           setWishOn(false);
           setFavoritoId("");
@@ -760,7 +727,7 @@ export default function ProductDetailsPage() {
     const pesoTipo = product.Peso ?? product.peso ?? "";
     const dimensionTipo = product.Dimension ?? product.dimension ?? "";
 
-    const ship = estimateShippingFromProduct(shipCity, {
+    const {ship,peso} = estimateShippingFromProduct(shipCity, {
       method: shipMethod,
       pesoTipo,
       dimensionTipo,
@@ -791,6 +758,8 @@ export default function ProductDetailsPage() {
       shipEstimate: ship?.estimated ?? null,
       rating: product.Rating ?? product.rating ?? "4.0",
       _productKey: productKey,
+      Peso:peso,
+      Dimension: dimensionTipo,
       imgreal,
       imagenesreales: imgreal ? imagenesreales : [],
       youtubeId: product?.vid ?? null,
@@ -808,21 +777,47 @@ export default function ProductDetailsPage() {
     }));
   }, [related, i18n.language]);
 
-  // ✅ Prefetch de ProductGrid SOLO si habrá relacionados (idle)
   useEffect(() => {
     if (mappedRelated.length === 0) return;
-    const idd = idle(() => import("../components/productgrid"));
-    return () => {
-      if (typeof window === "undefined") return;
-      if ("cancelIdleCallback" in window && typeof idd === "number") {
-        try {
-          window.cancelIdleCallback(idd);
-        } catch {}
-      } else if (typeof idd === "number") clearTimeout(idd);
-    };
+    const h = idle(() => import("../components/productgrid"));
+    return () => cancelIdle(h);
   }, [mappedRelated.length]);
 
-  /* -------------------- favorites toggle (Firestore) -------------------- */
+  /* -------------------- Cover optimized URLs -------------------- */
+  const coverUrls = useMemo(() => (product ? getCoverUrls(product) : null), [product]);
+  const coverSrcSet = useMemo(() => (product ? buildCoverSrcSet(product) : ""), [product]);
+
+  const coverInitialSrc = useMemo(() => {
+    if (!product) return null;
+    // móvil empieza con thumb, desktop con card
+    return pickCoverUrl(product, { prefer: isDesktop ? "card" : "thumb" });
+  }, [product, isDesktop]);
+
+  /* -------------------- gallery thumbs (variants) -------------------- */
+  const galleryThumbs = useMemo(() => {
+    return (images ?? [])
+      .map((d) => {
+        const u = getGalleryUrls(d);
+        return { id: d.id, thumb: u.thumb || u.original, detail: u.detail || u.original };
+      })
+      .filter((x) => x.thumb || x.detail);
+  }, [images]);
+
+  // JPG reales (si existen) => limitamos a 2
+  const realThumbs = useMemo(() => {
+    return (mapped?.imagenesreales ?? []).filter(Boolean).slice(0, 2);
+  }, [mapped?.imagenesreales]);
+
+  const disableColorRequired = colors.length > 0 && !selectedColor;
+
+  const hasMoreDetails = useMemo(() => {
+    const txt = String(mapped?._details ?? "").trim();
+    return txt.length > 160;
+  }, [mapped?._details]);
+
+  const qtyOptions = useMemo(() => Array.from({ length: 9 }, (_, i) => i + 1), []);
+
+  /* -------------------- favorites toggle -------------------- */
   const toggleFavoriteFS = useCallback(async () => {
     if (!mapped?._productKey) return;
 
@@ -852,7 +847,7 @@ export default function ProductDetailsPage() {
         let idToDelete = favoritoId;
         if (!idToDelete) {
           const fav = await getFavoriteRefFromProductFS({ userId, productId });
-          idToDelete = fav?.id ?? "";
+          idToDelete = fav?.id ?? fav?.idDoc ?? "";
         }
         if (idToDelete) {
           await removeFromFavoritesFS({ favoritoId: idToDelete, userId, productId });
@@ -867,7 +862,7 @@ export default function ProductDetailsPage() {
     }
   }, [mapped, userId, nav, wishOn, favoritoId, favBusy]);
 
-  /* -------------------- cart add (con loader) -------------------- */
+  /* -------------------- cart add -------------------- */
   const addToCart = useCallback(async () => {
     if (!mapped) return;
 
@@ -883,15 +878,19 @@ export default function ProductDetailsPage() {
       const producto = mapped._productKey;
 
       const precioReal = Number(mapped._finalPrice ?? 0);
-      const Envio = Number(mapped.shipEstimate ?? 0);
       const url = window.location.href;
 
-      const Img = activeImage ?? mapped.Imagen ?? mapped.image ?? "";
+      // ✅ usa image optimizada actual (si es cover, usa card/thumb)
+      const Img =
+        active?.kind === "gallery"
+          ? active.url
+          : active?.kind === "real"
+          ? active.url
+          : coverUrls?.card || coverUrls?.thumb || mapped.Imagen || "";
 
       const Detalles = [
         shipCity ? `Envío a: ${shipCity}` : null,
         mapped.shipDurationText ? `Entrega: ${mapped.shipDurationText}` : null,
-        Envio ? `Envío: ${Envio}` : null,
         selectedColor
           ? `Color: ${
               selectedColor.nombre ??
@@ -918,9 +917,10 @@ export default function ProductDetailsPage() {
         Producto: producto,
         Titulo,
         Precio: precioReal,
-        Envio,
         Img,
         Vendedor,
+        Ciudad:shipCity,
+Peso: (mapped.Peso ?? 0) * qty,
         qty,
         Detalles,
         link: url,
@@ -935,7 +935,18 @@ export default function ProductDetailsPage() {
     } finally {
       setCartSaving(false);
     }
-  }, [mapped, activeImage, nav, cart, qty, shipCity, selectedColor, selectedStyle, userId]);
+  }, [
+    mapped,
+    active,
+    coverUrls,
+    nav,
+    cart,
+    qty,
+    shipCity,
+    selectedColor,
+    selectedStyle,
+    userId,
+  ]);
 
   const comprarahora = useCallback(() => {
     if (!mapped) return;
@@ -946,14 +957,19 @@ export default function ProductDetailsPage() {
     }
 
     const url = window.location.href;
-
     const Envio = Number(mapped.shipEstimate ?? 0);
-    const Img = activeImage ?? mapped.Imagen ?? mapped.image ?? "";
+
+    const Img =
+      active?.kind === "gallery"
+        ? active.url
+        : active?.kind === "real"
+        ? active.url
+        : coverUrls?.card || coverUrls?.thumb || mapped.Imagen || "";
 
     const Detalles = [
       shipCity ? `Envío a: ${shipCity}` : null,
       mapped.shipDurationText ? `Entrega: ${mapped.shipDurationText}` : null,
-      Envio ? `Envío: ${Envio}` : null,
+      
       selectedColor
         ? `Color: ${
             selectedColor.nombre ??
@@ -966,7 +982,10 @@ export default function ProductDetailsPage() {
       selectedStyle
         ? `Estilo: ${
             selectedStyle.nombre ??
-            selectedStyle.name ?? selectedStyle.label ?? selectedStyle.Nombre ?? ""
+            selectedStyle.name ??
+            selectedStyle.label ??
+            selectedStyle.Nombre ??
+            ""
           }`
         : null,
     ]
@@ -977,17 +996,29 @@ export default function ProductDetailsPage() {
       Producto: mapped._productKey,
       Titulo: mapped._title ?? "Producto",
       Precio: Number(mapped._finalPrice ?? 0),
-      Envio,
+Peso: (mapped.Peso ?? 0) * qty,
       Img,
       Vendedor: mapped.vendedor,
       qty,
       Detalles,
+      Ciudad:shipCity,
+
       link: url,
       sub: mapped.Subcategoria ?? "Otros",
     };
 
     nav("/checkout", { state: { buyNowItem } });
-  }, [mapped, userId, nav, activeImage, qty, shipCity, selectedColor, selectedStyle]);
+  }, [
+    mapped,
+    userId,
+    nav,
+    active,
+    coverUrls,
+    qty,
+    shipCity,
+    selectedColor,
+    selectedStyle,
+  ]);
 
   const onShare = useCallback(async () => {
     if (!mapped) return;
@@ -1001,24 +1032,16 @@ export default function ProductDetailsPage() {
     } catch {}
   }, [mapped]);
 
-  const thumbUrls = useMemo(() => {
-    const base = (images ?? []).map(pickImgUrl).filter(Boolean);
-    const real = (mapped?.imagenesreales ?? []).filter(Boolean);
-    return [...base, ...real.slice(0, 2)];
-  }, [images, mapped?.imagenesreales]);
-
-  const disableColorRequired = colors.length > 0 && !selectedColor;
-
-  const hasMoreDetails = useMemo(() => {
-    const txt = String(mapped?._details ?? "").trim();
-    return txt.length > 160;
-  }, [mapped?._details]);
-
-  const qtyOptions = useMemo(() => Array.from({ length: 9 }, (_, i) => i + 1), []);
+  // ✅ imagen principal: si active es gallery/real => usa esa URL,
+  // si no => cover (con srcSet)
+  const mainImgSrc = useMemo(() => {
+    if (active?.kind === "gallery") return active.url;
+    if (active?.kind === "real") return active.url;
+    return coverInitialSrc || mapped?.Imagen || null;
+  }, [active, coverInitialSrc, mapped?.Imagen]);
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
-      {/* ✅ Header solo desktop, lazy (sin state/effect extra) */}
       {isDesktop ? (
         <Suspense fallback={null}>
           <Header queryText="" onQueryChange={() => {}} />
@@ -1053,7 +1076,6 @@ export default function ProductDetailsPage() {
           <Alert severity="error">{err}</Alert>
         ) : mapped ? (
           <>
-            {/* --- TU UI EXACTA (sin cambios) --- */}
             <Paper elevation={0} sx={{ p: { xs: 2, md: 3 }, borderRadius: 3 }}>
               <Box
                 sx={{
@@ -1066,9 +1088,13 @@ export default function ProductDetailsPage() {
                 <Box>
                   <Box sx={{ position: "relative" }}>
                     <img
-                      src={activeImage ?? mapped.Imagen ?? mapped.image}
+                      src={mainImgSrc}
+                      // ✅ srcSet SOLO para cover (active=null)
+                      srcSet={!active ? coverSrcSet : undefined}
+                      sizes={isDesktop ? "420px" : "100vw"}
                       alt={mapped._title}
                       loading="eager"
+                      fetchpriority="high"
                       decoding="async"
                       style={{
                         width: "100%",
@@ -1079,44 +1105,75 @@ export default function ProductDetailsPage() {
                     />
                   </Box>
 
-                  {thumbUrls.length > 0 && (
+                  {/* Thumbs */}
+                  {(coverUrls?.thumb || galleryThumbs.length > 0) && (
                     <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: "wrap" }}>
-                      {thumbUrls.map((url, idx) => {
-                        const selected = activeImage === url;
-                        return (
-                          <Box
-                            key={`${mapped._productKey}-thumb-${idx}`}
-                            onClick={() => setActiveImage(url)}
-                            sx={{
-                              width: 64,
-                              height: 64,
-                              borderRadius: 1.5,
-                              overflow: "hidden",
-                              cursor: "pointer",
-                              border: selected ? "2px solid" : "1px solid rgba(0,0,0,0.12)",
-                            }}
-                          >
-                            <img
-                              src={url}
-                              alt="thumb"
-                              loading="lazy"
-                              decoding="async"
-                              style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                            />
-                          </Box>
-                        );
-                      })}
+                      {/* cover thumb */}
+                      {coverUrls?.thumb && (
+                        <Box
+                          key="thumb-cover"
+                          onClick={() => setActive(null)}
+                          sx={{
+                            width: 64,
+                            height: 64,
+                            borderRadius: 1.5,
+                            overflow: "hidden",
+                            cursor: "pointer",
+                            border:
+                              active == null ? "2px solid rgba(0,0,0,0.5)" : "1px solid rgba(0,0,0,0.12)",
+                          }}
+                        >
+                          <img
+                            src={coverUrls.thumb}
+                            alt="cover-thumb"
+                            loading="lazy"
+                            decoding="async"
+                            width="64"
+                            height="64"
+                            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          />
+                        </Box>
+                      )}
+
+                      {galleryThumbs.map((g, idx) => (
+                        <Box
+                          key={g.id || idx}
+                          onClick={() => setActive({ kind: "gallery", id: g.id, url: g.detail })}
+                          sx={{
+                            width: 64,
+                            height: 64,
+                            borderRadius: 1.5,
+                            overflow: "hidden",
+                            cursor: "pointer",
+                            border:
+                              active?.kind === "gallery" && active.id === g.id
+                                ? "2px solid rgba(0,0,0,0.5)"
+                                : "1px solid rgba(0,0,0,0.12)",
+                          }}
+                        >
+                          <img
+                            src={g.thumb}
+                            alt={`thumb-${idx}`}
+                            loading="lazy"
+                            decoding="async"
+                            width="64"
+                            height="64"
+                            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          />
+                        </Box>
+                      ))}
                     </Stack>
                   )}
 
-                  {mapped.imgreal && (mapped.imagenesreales?.length ?? 0) > 0 && (
+                  {/* Imágenes reales (JPG) limitadas */}
+                  {mapped.imgreal && realThumbs.length > 0 && (
                     <Paper variant="outlined" sx={{ mt: 2, p: 1.5, borderRadius: 2 }}>
                       <Typography sx={{ fontWeight: 900, mb: 1 }}>Imágenes reales</Typography>
                       <Stack direction="row" spacing={1}>
-                        {mapped.imagenesreales.slice(0, 2).map((url, idx) => (
+                        {realThumbs.map((url, idx) => (
                           <Box
                             key={`${mapped._productKey}-real-${idx}`}
-                            onClick={() => setActiveImage(url)}
+                            onClick={() => setActive({ kind: "real", url })}
                             sx={{
                               width: 88,
                               height: 88,
@@ -1131,6 +1188,8 @@ export default function ProductDetailsPage() {
                               alt={`real-${idx + 1}`}
                               loading="lazy"
                               decoding="async"
+                              width="88"
+                              height="88"
                               style={{ width: "100%", height: "100%", objectFit: "cover" }}
                             />
                           </Box>
@@ -1158,13 +1217,13 @@ export default function ProductDetailsPage() {
                       <Typography sx={{ fontWeight: 900 }}>{mapped.rating}</Typography>
                     </Stack>
 
-                    <Chip
+                    {/* <Chip
                       size="small"
                       label={`Visitas:${mapped.Vistos !== undefined ? mapped.Vistos : 50}`}
                       variant="outlined"
-                    />
-                    <Chip size="small" label="Precio China" variant="outlined" />
-                    <Chip size="small" label="Envío África" variant="outlined" />
+                    /> */}
+                    <Chip size="small" label="Compra Internacional" variant="outlined" />
+                    <Chip size="small" label="Envíos a Malabo/Bata" variant="outlined" />
                   </Stack>
 
                   <Box sx={{ mt: 1 }}>
@@ -1302,25 +1361,27 @@ export default function ProductDetailsPage() {
                   </Stack>
 
                   <Typography sx={{ color: "text.secondary", mt: 0.5 }}>
-                    Estimación de envío ({shipMethod === "AIR" ? "Aéreo" : "Marítimo"}):{" "}
+                   Costo de Envio estimado ({shipMethod === "AIR" ? "Aéreo" : "Marítimo"}):{" "}
                     <b>
                       {mapped.shipEstimate != null
                         ? `XFA ${puntodecimal(mapped.shipEstimate)}`
                         : "No disponible"}
                     </b>{" "}
-                    (informativo)
                   </Typography>
+                   <Typography sx={{ color: "text.secondary" }}>
+Confirmamos el costo final con usted antes del despacho para mas transparencia.                    
+</Typography>
 
                   <BottomActionBar
-                      cartSaving={cartSaving}
-                      disableColorRequired={colors.length > 0 && !selectedColor}
-                      comprarahora={comprarahora}
-                      addToCart={addToCart}
-                      wishOn={wishOn}
-                      toggleFavoriteFS={toggleFavoriteFS}
-                      favBusy={favBusy}
-                      onShare={onShare}
-                    />
+                    cartSaving={cartSaving}
+                    disableColorRequired={colors.length > 0 && !selectedColor}
+                    comprarahora={comprarahora}
+                    addToCart={addToCart}
+                    wishOn={wishOn}
+                    toggleFavoriteFS={toggleFavoriteFS}
+                    favBusy={favBusy}
+                    onShare={onShare}
+                  />
 
                   <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
                     <Chip icon={<VerifiedUserIcon />} label="Compra protegida" />
@@ -1334,7 +1395,6 @@ export default function ProductDetailsPage() {
               </Box>
             </Paper>
 
-            {/* ✅ Relacionados: lazy-load solo si hay data */}
             {mappedRelated.length > 0 && (
               <Paper elevation={0} sx={{ mt: 2, p: 2, borderRadius: 3 }}>
                 <Typography variant="h6" sx={{ fontWeight: 900, mb: 2 }}>

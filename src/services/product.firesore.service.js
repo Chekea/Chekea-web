@@ -68,14 +68,35 @@ function buildSort(sort) {
  */
 
 
+
+function mapDocCard(d) {
+  const data = d.data();
+
+  // ✅ retorna lo mínimo para la card (menos trabajo en UI)
+  return {
+    docId: d.id,
+    Codigo: data.Codigo ?? d.id,
+    Titulo: data.Titulo ?? data.title ?? "",
+    Categoria: data.Categoria ?? "",
+    Subcategoria: data.Subcategoria ?? "",
+    Genero: data.Genero ?? "",
+    Precio: data.Precio ?? 0,
+    Rebaja: data.Rebaja ?? 0,
+    discount: data.discount ?? data.Descuento ?? 0,
+    shipping: data.shipping ?? "",
+    Imagen: data.Imagen ?? "",
+    media: data.media ?? null, // para variants
+  };
+}
+
 export async function getProductsPageFirestore({
   pageSize = 12,
   category = "ALL",
   subcategory = "ALL",
   sort = "newest",
   queryText = "",
-  lastDoc = null,      // DocumentSnapshot (si ya lo tienes)
-  lastDocId = null,    // ✅ SOLO ID (persistible)
+  lastDoc = null,
+  lastDocId = null,
 }) {
   const qText = normalizeQueryText(queryText);
   const { field, dir } = buildSort(sort);
@@ -83,35 +104,30 @@ export async function getProductsPageFirestore({
   const colRef = collection(db, PRODUCTS_COL);
   const constraints = [];
 
-  if (category && category !== "ALL") {
-    constraints.push(where("Categoria", "==", category));
-  }
+  if (category && category !== "ALL") constraints.push(where("Categoria", "==", category));
 
-  // ✅ condición especial para masculina
   if (subcategory && subcategory !== "ALL") {
-    if (subcategory === "Masculina") {
-      constraints.push(where("Genero", "==", "Masculina"));
-    } else {
-      constraints.push(where("Subcategoria", "==", subcategory));
-    }
+    if (subcategory === "Masculina") constraints.push(where("Genero", "==", "Masculina"));
+    else constraints.push(where("Subcategoria", "==", subcategory));
   }
 
-  if (qText) {
-    constraints.push(where("searchKeywords", "array-contains", qText));
-  }
+  if (qText) constraints.push(where("searchKeywords", "array-contains", qText));
 
   constraints.push(orderBy(field, dir));
 
   // ✅ si me pasan id, recupero el snapshot
   let effectiveLastDoc = lastDoc;
   if (!effectiveLastDoc && lastDocId) {
-    const snap = await getDoc(doc(db, PRODUCTS_COL, lastDocId));
-    if (snap.exists()) effectiveLastDoc = snap;
+    try {
+      const snap = await getDoc(doc(db, PRODUCTS_COL, lastDocId));
+      if (snap.exists()) effectiveLastDoc = snap;
+    } catch {
+      // si el doc ya no existe, ignora cursor
+      effectiveLastDoc = null;
+    }
   }
 
-  if (effectiveLastDoc) {
-    constraints.push(startAfter(effectiveLastDoc));
-  }
+  if (effectiveLastDoc) constraints.push(startAfter(effectiveLastDoc));
 
   constraints.push(limit(pageSize + 1));
 
@@ -122,17 +138,15 @@ export async function getProductsPageFirestore({
   const hasNext = docs.length > pageSize;
 
   const slice = docs.slice(0, pageSize);
-  const items = slice.map(mapDoc);
+  const items = slice.map(mapDocCard);
 
-  const nextLastDoc = slice.length
-    ? slice[slice.length - 1]
-    : effectiveLastDoc;
+  const nextLastDoc = slice.length ? slice[slice.length - 1] : effectiveLastDoc;
 
   return {
     items,
     hasNext,
-    lastDoc: nextLastDoc, // snapshot para paginación normal
-    lastDocId: nextLastDoc ? nextLastDoc.id : lastDocId, // ✅ id para persistir
+    lastDoc: nextLastDoc,
+    lastDocId: nextLastDoc ? nextLastDoc.id : lastDocId,
   };
 }
 
@@ -217,7 +231,16 @@ export async function getProductStylesFS(productId) {
 export async function getProductImagesFS(productId) {
   const ref = collection(db, PRODUCTS_COL, productId, "imagenes");
   const snap = await getDocs(ref);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+  // ✅ devuelve mínimo
+  return snap.docs.map((d) => {
+    const data = d.data() || {};
+    return {
+      id: d.id,
+      media: data.media || null,
+      Imagen: data.Imagen || data.Image || data.URL || data.url || null, // fallback
+    };
+  });
 }
 
 /* ======================================================

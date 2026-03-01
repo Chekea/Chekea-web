@@ -88,7 +88,7 @@ export async function addToCartFS(userId, product) {
     Precio: Number(product.Precio ?? 0) || 0,
     Img: String(product.Img ?? "").trim(),
     Detalles: product.Detalles ?? "",
-    Envio:Number(product.Envio ?? 0) || 0,
+    Peso:Number(product.Peso ?? 0) || 0,
     qty: Math.max(1, Number(product.qty ?? 1) || 1),
     Fecha: getCurrentTimestamp(),
   };

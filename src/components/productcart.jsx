@@ -1,137 +1,94 @@
+// src/components/productcart.jsx
 import React, { memo, useCallback, useMemo } from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import StarIcon from "@mui/icons-material/Star";
 import { useNavigate } from "react-router-dom";
 import { puntodecimal } from "../utils/Helpers";
-
-const FALLBACK_IMG = "https://via.placeholder.com/600?text=Chekea";
+import { pickCoverUrl } from "../utils/media";
 
 function areEqual(prev, next) {
-  return prev.product === next.product && prev.isFirst === next.isFirst;
+  const p = prev.product;
+  const n = next.product;
+  const pid = p?.Codigo ?? p?._id ?? p?.docId ?? p?.id;
+  const nid = n?.Codigo ?? n?._id ?? n?.docId ?? n?.id;
+
+  return pid === nid && prev.isFirst === next.isFirst && prev.dense === next.dense;
 }
 
-const ProductCard = memo(function ProductCard({ product, isFirst = false }) {
+const ProductCard = memo(function ProductCard({ product, isFirst = false, dense = false }) {
   const navigate = useNavigate();
 
-  // ✅ misma lógica de negocio para ID
-  const productId = useMemo(() => {
-    return product?.Codigo ?? product?._id ?? product?.docId ?? product?.id ?? null;
-  }, [product]);
+  const productId = useMemo(
+    () => product?.Codigo ?? product?._id ?? product?.docId ?? product?.id ?? null,
+    [product]
+  );
 
-  const navegarprod = useCallback(() => {
+  const onOpen = useCallback(() => {
     if (!productId) return;
-    // rAF ayuda a que el tap se sienta más fluido en WebView
     requestAnimationFrame(() => navigate(`/product/${productId}`));
   }, [navigate, productId]);
 
-  // ✅ misma lógica de negocio para discount/precio
-  const discount = Number(product?.discount ?? 0) || 0;
   const precio = Number(product?.Precio ?? 0) || 0;
+  const discountPct = Number(product?.discount ?? product?.Descuento ?? 0) || 0;
 
   const finalPrice = useMemo(() => {
-    return discount > 0 ? Number((precio * (1 - discount / 100)).toFixed(2)) : precio;
-  }, [precio, discount]);
+    if (discountPct > 0) return Number((precio * (1 - discountPct / 100)).toFixed(2));
+    const rebaja = Number(product?.Rebaja ?? 0) || 0;
+    return rebaja > 0 ? rebaja : precio;
+  }, [precio, discountPct, product?.Rebaja]);
 
-  const title = product?.Titulo ?? "";
+  const title = product?.Titulo ?? product?.title ?? "";
   const category = product?.Categoria ?? "";
-  const shipping = product?.shipping ?? "";
-  const rating = product?.Genero === 'Masculina' ? '5.0' : "4.0";
-  const img = product?.Imagen || FALLBACK_IMG;
+
+  // ✅ SIEMPRE thumb (barato)
+  const img = useMemo(() => pickCoverUrl(product, { prefer: "thumb" }), [product]);
 
   return (
     <Box
-      onClick={navegarprod}
+      onClick={onOpen}
       role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") navegarprod();
-      }}
       sx={{
         borderRadius: 3,
         overflow: "hidden",
-        width: "100%",
-        minWidth: 0,
         cursor: "pointer",
-        backgroundColor: "background.paper",
+        bgcolor: "background.paper",
         border: "1px solid rgba(0,0,0,0.06)",
-        contain: "layout paint style",
       }}
     >
-      {/* Imagen */}
-      <Box sx={{ position: "relative", width: "100%" }}>
-        <Box
-          component="img"
-          src={img}
-          alt={title}
-          loading={isFirst ? "eager" : "lazy"}
-          decoding="async"
-          {...(isFirst ? { fetchpriority: "high" } : {})}
-          style={{
-            width: "100%",
-            height: 190,
-            display: "block",
-            objectFit: "cover",
-          }}
-        />
+      <Box
+        component="img"
+        src={img}
+        alt={title}
+        loading={isFirst ? "eager" : "lazy"}
+        decoding="async"
+        width="320"
+        height="160"
+        style={{
+          width: "100%",
+          height: dense ? 150 : 160,
+          objectFit: "cover",
+          display: "block",
+        }}
+      />
 
-        {discount > 0 && (
-          <Box
-            sx={{
-              position: "absolute",
-              top: 10,
-              left: 10,
-              px: 1,
-              py: 0.5,
-              borderRadius: 999,
-              fontWeight: 900,
-              fontSize: 12,
-              bgcolor: "secondary.main",
-              color: "secondary.contrastText",
-            }}
-          >
-            -{discount}%
-          </Box>
-        )}
-      </Box>
-
-      {/* Contenido */}
-      <Box sx={{ p: 1.25, minWidth: 0 }}>
-        <Typography sx={{ fontWeight: 900, fontSize: 14 }} noWrap title={title}>
+      <Box sx={{ p: 1.25 }}>
+        <Typography sx={{ fontWeight: 900, fontSize: 14 }} noWrap>
           {title}
         </Typography>
 
-        <Typography
-          sx={{ color: "text.secondary", fontSize: 12 }}
-          noWrap
-          title={category + (shipping ? ` • ${shipping}` : "")}
-        >
+        <Typography sx={{ fontSize: 12, color: "text.secondary" }} noWrap>
           {category}
-          {shipping ? ` • ${shipping}` : ""}
         </Typography>
 
-        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mt: 0.75 }}>
-          <StarIcon sx={{ fontSize: 16 }} />
-          <Typography sx={{ fontWeight: 800, fontSize: 12 }}>{rating}</Typography>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mt: 0.5 }}>
+          <StarIcon sx={{ fontSize: 14 }} />
+          <Typography sx={{ fontSize: 12, fontWeight: 700 }}>4.8</Typography>
         </Box>
 
-        <Box sx={{ mt: 1, display: "flex", alignItems: "baseline", gap: 1, minWidth: 0 }}>
-          <Typography sx={{ fontWeight: 900, fontSize: 16 }}>
-            XFA {puntodecimal(finalPrice)}
-          </Typography>
-
-          {discount > 0 && (
-            <Typography
-              sx={{
-                color: "text.secondary",
-                textDecoration: "line-through",
-                fontSize: 12,
-              }}
-            >
-              {puntodecimal(precio)}
-            </Typography>
-          )}
-        </Box>
+        <Typography sx={{ fontWeight: 900, fontSize: 15, mt: 1 }}>
+          XFA {puntodecimal(finalPrice)}
+        </Typography>
       </Box>
     </Box>
   );

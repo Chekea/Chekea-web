@@ -21,25 +21,44 @@ import { puntodecimal } from "../utils/Helpers";
 
 const PAGE_SIZE = 12;
 
+/* -------------------- helpers seguros -------------------- */
+function toNumber(v) {
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  const n = Number(String(v ?? "").replace(",", "."));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function qtyOf(item) {
+  const q = toNumber(item?.qty);
+  return q > 0 ? q : 1;
+}
+
+/** peso en KG (normaliza). Prioridad: PesoKg > Peso */
+function pesoKgOf(item) {
+  return toNumber(item?.PesoKg ?? item?.pesoKg ?? item?.Peso ?? item?.peso ?? 0);
+}
+
 export default function CartPage() {
   const cart = useCart();
   const nav = useNavigate();
 
   const [page, setPage] = useState(1);
 
-  // -------- Derived state (minimize repeated lookups) --------
-  const itemsLen = cart.items?.length ?? 0;
-  const selectedCount = cart.selectedCount;
-
-  const totalAll = useMemo(() => Number(cart.total().toFixed(2)), [cart]);
-  const totalSelected = useMemo(() => Number(cart.selectedTotal().toFixed(2)), [cart]);
+  // -------- derived state --------
+  const items = cart.items ?? [];
+  const itemsLen = items.length;
+  const selectedIds = cart.selectedIds; // Set
+  const selectedCount = cart.selectedCount ?? 0;
 
   const allSelected = useMemo(
     () => itemsLen > 0 && selectedCount === itemsLen,
     [itemsLen, selectedCount]
   );
 
-  const pageCount = useMemo(() => Math.max(1, Math.ceil(itemsLen / PAGE_SIZE)), [itemsLen]);
+  const pageCount = useMemo(
+    () => Math.max(1, Math.ceil(itemsLen / PAGE_SIZE)),
+    [itemsLen]
+  );
 
   useEffect(() => {
     if (page > pageCount) setPage(pageCount);
@@ -47,13 +66,55 @@ export default function CartPage() {
 
   const pagedItems = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE;
-    return cart.items.slice(start, start + PAGE_SIZE);
-  }, [cart.items, page]);
+    return items.slice(start, start + PAGE_SIZE);
+  }, [items, page]);
 
-  // -------- Handlers (stable) --------
+  /**
+   * ✅ Totales:
+   * - totalAll: suma de productos (precio * qty)
+   * - totalSelected: suma de productos seleccionados (precio * qty)
+   * - totalPesoAllKg: suma de pesos (kg * qty) de toda la caja
+   * - totalPesoSelectedKg: suma de pesos (kg * qty) solo seleccionados
+   */
+  const totals = useMemo(() => {
+    let totalAll = 0;
+    let totalSelected = 0;
+
+    let totalPesoAllKg = 0;
+    let totalPesoSelectedKg = 0;
+
+    for (const it of items) {
+      const q = qtyOf(it);
+
+      const priceRow = toNumber(it?.Precio) * q;
+      totalAll += priceRow;
+
+      const pesoRow = pesoKgOf(it) * q;
+      totalPesoAllKg += pesoRow;
+
+      if (selectedIds?.has(it.id)) {
+        totalSelected += priceRow;
+        totalPesoSelectedKg += pesoRow;
+      }
+    }
+
+    return {
+      totalAll: Number(totalAll.toFixed(2)),
+      totalSelected: Number(totalSelected.toFixed(2)),
+      totalPesoAllKg: Number(totalPesoAllKg.toFixed(3)),
+      totalPesoSelectedKg: Number(totalPesoSelectedKg.toFixed(3)),
+    };
+  }, [items, selectedIds]);
+
+  // -------- handlers (stable) --------
   const goCheckout = useCallback(() => {
-    nav("/checkout", { state: { selectedIds: Array.from(cart.selectedIds) } });
-  }, [cart.selectedIds, nav]);
+    nav("/checkout", {
+      state: {
+        selectedIds: Array.from(selectedIds ?? []),
+        totalPesoSelectedKg: totals.totalPesoSelectedKg, // ✅ PASAMOS EL PESO TOTAL
+      },
+    });
+  }, [selectedIds, nav, totals.totalPesoSelectedKg]);
 
   const onPageChange = useCallback((_e, nextPage) => {
     setPage(nextPage);
@@ -65,7 +126,7 @@ export default function CartPage() {
     else cart.selectAll();
   }, [allSelected, cart]);
 
-  const showMobileFixedCTA = cart.ready && itemsLen > 0; // siempre visible en móvil (aunque deshabilitado si 0)
+  const showMobileFixedCTA = cart.ready && itemsLen > 0;
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
@@ -75,11 +136,10 @@ export default function CartPage() {
         maxWidth="lg"
         sx={{
           py: { xs: 2, md: 3 },
-          // ✅ espacio para que el botón fijo no tape la paginación / último item
           pb: { xs: showMobileFixedCTA ? 10 : 3, md: 3 },
         }}
       >
-        {/* Header row responsive */}
+        {/* Header */}
         <Stack
           direction={{ xs: "column", sm: "row" }}
           spacing={1}
@@ -124,7 +184,7 @@ export default function CartPage() {
           >
             {/* LISTA */}
             <Stack spacing={1}>
-              {/* toolbar responsive */}
+              {/* Toolbar */}
               <Paper elevation={0} sx={{ p: { xs: 1.25, sm: 1.5 }, borderRadius: 3 }}>
                 <Stack spacing={1}>
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
@@ -156,9 +216,12 @@ export default function CartPage() {
                 </Stack>
               </Paper>
 
-              {/* ✅ items paginados */}
+              {/* ITEMS */}
               {pagedItems.map((p) => {
-                const checked = cart.selectedIds.has(p.id);
+                const checked = selectedIds?.has(p.id);
+                const q = qtyOf(p);
+                const subtotalProducto = toNumber(p?.Precio) * q;
+                const pesoRow = pesoKgOf(p) * q;
 
                 return (
                   <Paper
@@ -189,31 +252,36 @@ export default function CartPage() {
                           borderRadius: 2,
                           overflow: "hidden",
                           bgcolor: "rgba(0,0,0,0.04)",
+                          flex: "0 0 auto",
                         }}
                       >
                         <img
                           src={p.Img}
                           alt={p.Titulo}
-                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          width="64"
+                          height="64"
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                            display: "block",
+                          }}
                           loading="lazy"
+                          decoding="async"
                         />
                       </Box>
 
                       <Box sx={{ minWidth: 0 }}>
-                        <Typography sx={{ fontWeight: 900 }} noWrap>
+                        <Typography sx={{ fontWeight: 900 }} noWrap title={p.Titulo}>
                           {p.Titulo}
                         </Typography>
 
                         <Typography variant="body2" sx={{ color: "text.secondary" }}>
-                          XFA {puntodecimal(p.Precio)}{" "}
-                          <Box component="span" sx={{ mx: 0.5 }}>
-                            +
-                          </Box>
-                          (Envío) {puntodecimal(p.Envio)}
+                          Producto: XFA {puntodecimal(subtotalProducto)}
                         </Typography>
 
                         <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.25 }}>
-                          Cantidad: <b>{p.qty ?? 1}</b>
+                          Cantidad: <b>{q}</b> • Peso: <b>{pesoRow.toFixed(3)} kg</b>
                         </Typography>
 
                         {p.Detalles ? (
@@ -231,7 +299,7 @@ export default function CartPage() {
                 );
               })}
 
-              {/* ✅ pagination */}
+              {/* Pagination */}
               {pageCount > 1 && (
                 <Box sx={{ display: "flex", justifyContent: "center", mt: 1 }}>
                   <Pagination
@@ -247,7 +315,7 @@ export default function CartPage() {
               )}
             </Stack>
 
-            {/* RESUMEN - sticky en desktop */}
+            {/* RESUMEN */}
             <Paper
               variant="outlined"
               sx={{
@@ -265,12 +333,20 @@ export default function CartPage() {
                 <Typography sx={{ fontWeight: 900 }}>{selectedCount}</Typography>
               </Box>
 
-              <Box sx={{ display: "flex", justifyContent: "space-between", mb: 1.5 }}>
-                <Typography sx={{ color: "text.secondary" }}>Total seleccionados</Typography>
-                <Typography sx={{ fontWeight: 900 }}>XFA {puntodecimal(totalSelected)}</Typography>
+              <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+                <Typography sx={{ color: "text.secondary" }}>Peso seleccionados</Typography>
+                <Typography sx={{ fontWeight: 900 }}>
+                  {totals.totalPesoSelectedKg} kg
+                </Typography>
               </Box>
 
-              {/* ✅ este botón solo desktop; en móvil será fijo abajo */}
+              <Box sx={{ display: "flex", justifyContent: "space-between", mb: 1.5 }}>
+                <Typography sx={{ color: "text.secondary" }}>Total seleccionados</Typography>
+                <Typography sx={{ fontWeight: 900 }}>
+                  XFA {puntodecimal(totals.totalSelected)}
+                </Typography>
+              </Box>
+
               <Button
                 variant="contained"
                 fullWidth
@@ -285,7 +361,16 @@ export default function CartPage() {
 
               <Box sx={{ display: "flex", justifyContent: "space-between" }}>
                 <Typography sx={{ color: "text.secondary" }}>Total de la caja</Typography>
-                <Typography sx={{ fontWeight: 700 }}>XFA {puntodecimal(totalAll)}</Typography>
+                <Typography sx={{ fontWeight: 700 }}>
+                  XFA {puntodecimal(totals.totalAll)}
+                </Typography>
+              </Box>
+
+              <Box sx={{ display: "flex", justifyContent: "space-between", mt: 0.5 }}>
+                <Typography sx={{ color: "text.secondary" }}>Peso total caja</Typography>
+                <Typography sx={{ fontWeight: 700 }}>
+                  {totals.totalPesoAllKg} kg
+                </Typography>
               </Box>
 
               {selectedCount === 0 ? (
@@ -298,7 +383,7 @@ export default function CartPage() {
         )}
       </Container>
 
-      {/* ✅ MISMO BOTÓN, FIXED ABAJO SOLO EN MÓVIL (sin extras) */}
+      {/* CTA MÓVIL */}
       {showMobileFixedCTA ? (
         <Box
           sx={{
@@ -312,7 +397,7 @@ export default function CartPage() {
             borderTop: "1px solid",
             borderColor: "divider",
             boxShadow: "0 -8px 24px rgba(0,0,0,0.08)",
-            pb: "env(safe-area-inset-bottom)", // iOS safe area
+            pb: "env(safe-area-inset-bottom)",
           }}
         >
           <Container maxWidth="lg" sx={{ py: 1.25 }}>

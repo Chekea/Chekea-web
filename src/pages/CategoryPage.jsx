@@ -1,15 +1,5 @@
 // src/pages/CategoryPage.jsx
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  lazy,
-  Suspense,
-  memo,
-} from "react";
-
+import React, { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, memo } from "react";
 import Container from "@mui/material/Container";
 import Box from "@mui/material/Box";
 import Paper from "@mui/material/Paper";
@@ -20,27 +10,18 @@ import CircularProgress from "@mui/material/CircularProgress";
 import Stack from "@mui/material/Stack";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import { useTheme } from "@mui/material/styles";
-
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams, useNavigationType } from "react-router-dom";
-
 import { getProductsPageFirestore } from "../services/product.firesore.service";
 
 const ProductGrid = lazy(() => import("../components/productgrid"));
 const Header = lazy(() => import("../components/header"));
 
-const PAGE_SIZE = 12;
+const PAGE_SIZE_DESKTOP = 12;
+const PAGE_SIZE_MOBILE = 8; // ✅ menos datos móviles
 
 const SUBCATS_BY_CAT = {
-  "Moda & Accesorios": [
-    "Vestidos",
-    "Calzado",
-    "Bolsos",
-    "Trajes",
-    "Pantalones",
-    "Camisas",
-    "Otros",
-  ],
+  "Moda & Accesorios": ["Vestidos", "Calzado", "Bolsos", "Trajes", "Pantalones", "Camisas", "Otros"],
   "Belleza & Accesorios": ["Maquillaje", "Pelo", "Joyas", "Otros"],
   "Complementos para peques": ["Bebés", "Niños", "Moda", "Otros"],
   Hogar: ["Cocina", "Decoración", "Baño", "Sala de estar", "Dormitorio", "Iluminacion"],
@@ -58,12 +39,12 @@ function CenterLoader({ text = "Cargando productos…" }) {
 }
 
 /* ==================== CACHE (memoria) ==================== */
-const CACHE_TTL_MS = 5 * 60 * 1000;
-const CACHE_MAX_ENTRIES = 60;
+const CACHE_TTL_MS = 3 * 60 * 1000; // ✅ más agresivo (menos re-fetch)
+const CACHE_MAX_ENTRIES = 40;
 const pageCache = new Map();
 
-function makePageKey(category, subcat, sort, page) {
-  return `${category}__${subcat}__${sort}__p${page}`;
+function makePageKey(category, subcat, sort, page, pageSize) {
+  return `${category}__${subcat}__${sort}__p${page}__s${pageSize}`;
 }
 function cacheGet(key) {
   const hit = pageCache.get(key);
@@ -86,11 +67,11 @@ function cacheSet(key, value) {
 }
 
 /* ==================== VIEW SNAPSHOT CACHE (para back) ==================== */
-const VIEW_CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
+const VIEW_CACHE_TTL_MS = 10 * 60 * 1000;
 const viewCache = new Map();
 
-function makeViewKey(category, subcat, sort, page) {
-  return `VIEW__${category}__${subcat}__${sort}__p${page}`;
+function makeViewKey(category, subcat, sort, page, pageSize) {
+  return `VIEW__${category}__${subcat}__${sort}__p${page}__s${pageSize}`;
 }
 function viewCacheGet(key) {
   const hit = viewCache.get(key);
@@ -154,16 +135,13 @@ function clearLastDocIdForCtx(ctxKey) {
 
 /* ==================== RN WebView Bridge (opcional) ==================== */
 const RN_BRIDGE_NS = "RN_BRIDGE_V1";
-
 function isRNWebView() {
   return typeof window !== "undefined" && !!window.ReactNativeWebView;
 }
 function rnPost(type, payload) {
   if (!isRNWebView()) return;
   try {
-    window.ReactNativeWebView.postMessage(
-      JSON.stringify({ ns: RN_BRIDGE_NS, type, payload, ts: Date.now() })
-    );
+    window.ReactNativeWebView.postMessage(JSON.stringify({ ns: RN_BRIDGE_NS, type, payload, ts: Date.now() }));
   } catch {}
 }
 function rnGetLastDocIdForCtx(ctxKey) {
@@ -177,16 +155,15 @@ function rnGetLastDocIdForCtx(ctxKey) {
 /* ==================== idle preload ==================== */
 function idle(cb) {
   if (typeof window === "undefined") return;
-  if ("requestIdleCallback" in window) return window.requestIdleCallback(cb, { timeout: 1200 });
+  if ("requestIdleCallback" in window) return window.requestIdleCallback(cb, { timeout: 900 });
   return window.setTimeout(cb, 250);
 }
 
-/* ✅ SubcategoryBar SOLO se descargará si isDesktop === true */
+/* ✅ SubcategoryBar SOLO desktop */
 function lazyIfDesktop(isDesktop) {
   return isDesktop ? lazy(() => import("../components/subcategorybar")) : null;
 }
 
-/* ✅ HERO SOLO DESKTOP (Paper + SubcategoryBar) */
 const DesktopCategoryHero = memo(function DesktopCategoryHero({
   category,
   subcat,
@@ -195,7 +172,6 @@ const DesktopCategoryHero = memo(function DesktopCategoryHero({
   DesktopSubcategoryBar,
   onChangeSubcat,
 }) {
-  // ✅ en móvil ni render ni carga del componente
   if (!DesktopSubcategoryBar) return null;
 
   return (
@@ -219,11 +195,7 @@ const DesktopCategoryHero = memo(function DesktopCategoryHero({
       {subcatsForCat.length > 0 && (
         <Box sx={{ mt: 1.5 }}>
           <Suspense fallback={null}>
-            <DesktopSubcategoryBar
-              value={subcat}
-              options={["ALL", ...subcatsForCat]}
-              onChange={onChangeSubcat}
-            />
+            <DesktopSubcategoryBar value={subcat} options={["ALL", ...subcatsForCat]} onChange={onChangeSubcat} />
           </Suspense>
         </Box>
       )}
@@ -238,6 +210,8 @@ export default function CategoryPage() {
 
   const theme = useTheme();
   const isDesktop = useMediaQuery(theme.breakpoints.up("md"));
+  const pageSize = isDesktop ? PAGE_SIZE_DESKTOP : PAGE_SIZE_MOBILE;
+  const denseCards = !isDesktop;
 
   // ✅ navType congelado al montar
   const navType = useNavigationType();
@@ -262,10 +236,9 @@ export default function CategoryPage() {
   const ctxKey = useMemo(() => makeCtxKey(category, subcat, sort), [category, subcat, sort]);
   const subcatsForCat = useMemo(() => SUBCATS_BY_CAT[category] ?? [], [category]);
 
-  // ✅ SubcategoryBar solo desktop (no baja chunk en móvil)
   const DesktopSubcategoryBar = useMemo(() => lazyIfDesktop(isDesktop), [isDesktop]);
 
-  // ✅ Preload chunks en idle (reduce lag)
+  // ✅ Preload mínimo (no forces header/subcat en móvil)
   useEffect(() => {
     const id = idle(() => {
       import("../components/productgrid");
@@ -284,20 +257,18 @@ export default function CategoryPage() {
     };
   }, [isDesktop]);
 
-  // ✅ RN: notifica contexto
   useEffect(() => {
     if (!ctxKey || category === "ALL") return;
     rnPost("CTX_CHANGED", { ctxKey, category, subcat, sort });
   }, [ctxKey, category, subcat, sort]);
 
-  // ✅ updateParams: si no cambia, no replace (menos renders)
+  // ✅ updateParams sin renders extra
   const updateParams = useCallback(
     (patch) => {
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev);
           let changed = false;
-
           for (const [k, v] of Object.entries(patch)) {
             if (v === null || v === undefined) {
               if (next.has(k)) {
@@ -312,7 +283,6 @@ export default function CategoryPage() {
               }
             }
           }
-
           return changed ? next : prev;
         },
         { replace: true }
@@ -334,9 +304,7 @@ export default function CategoryPage() {
     const last = readLastState();
     if (!last || last?.ctxKey !== ctxKey) return;
 
-    if (last?.p && Number.isFinite(last.p) && last.p >= 1) {
-      updateParams({ p: last.p });
-    }
+    if (last?.p && Number.isFinite(last.p) && last.p >= 1) updateParams({ p: last.p });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctxKey]);
 
@@ -344,7 +312,6 @@ export default function CategoryPage() {
   useEffect(() => {
     if (!category || category === "ALL") return;
     if (!Number.isFinite(page) || page < 1) return;
-
     writeLastState({ ctxKey, cat: category, subcat, sort, p: page, ts: Date.now() });
   }, [ctxKey, category, subcat, sort, page]);
 
@@ -357,7 +324,6 @@ export default function CategoryPage() {
     if (prevCtxRef.current !== ctxKey) {
       prevCtxRef.current = ctxKey;
       if (entryNavType === "POP") return;
-
       lastDocsRef.current = { 1: null };
       updateParams({ p: 1 });
     }
@@ -373,11 +339,11 @@ export default function CategoryPage() {
     const myReqId = ++reqIdRef.current;
 
     async function load() {
-      const cacheKey = makePageKey(category, subcat, sort, page);
+      const cacheKey = makePageKey(category, subcat, sort, page, pageSize);
 
       // BACK: snapshot
       if (entryNavType === "POP") {
-        const vKey = makeViewKey(category, subcat, sort, page);
+        const vKey = makeViewKey(category, subcat, sort, page, pageSize);
         const snap = viewCacheGet(vKey);
         if (snap) {
           setError("");
@@ -386,23 +352,17 @@ export default function CategoryPage() {
           setLoading(false);
           if (snap.lastDocByPage) lastDocsRef.current = snap.lastDocByPage;
 
-          requestAnimationFrame(() => {
-            window.scrollTo({ top: snap.scrollY ?? 0, behavior: "auto" });
-          });
+          requestAnimationFrame(() => window.scrollTo({ top: snap.scrollY ?? 0, behavior: "auto" }));
           return;
         }
       }
 
       const isPage1 = page === 1;
-
       const rnLastDocId = rnGetLastDocIdForCtx(ctxKey);
       const webLastDocId = getLastDocIdForCtx(ctxKey);
       const savedCursor = rnLastDocId || webLastDocId;
 
-      const shouldAdvance = isRNWebView()
-        ? isPage1 && !!savedCursor
-        : entryNavType === "PUSH";
-
+      const shouldAdvance = isRNWebView() ? isPage1 && !!savedCursor : entryNavType === "PUSH";
       const bypassCache = isPage1 && shouldAdvance;
 
       if (!bypassCache) {
@@ -414,9 +374,7 @@ export default function CategoryPage() {
           setLoading(false);
           if (cached.lastDocByPage) lastDocsRef.current = cached.lastDocByPage;
 
-          if (entryNavType !== "POP") {
-            requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
-          }
+          if (entryNavType !== "POP") requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
           return;
         }
       }
@@ -429,11 +387,11 @@ export default function CategoryPage() {
         const savedLastDocId = isPage1 && shouldAdvance && !lastDoc ? savedCursor : null;
 
         let res = await getProductsPageFirestore({
-          pageSize: isDesktop ? PAGE_SIZE : 10,
+          pageSize,
           category,
           subcategory: subcat,
           sort,
-          queryText: "",
+          queryText: "", // si vas a usar búsqueda real, aquí va
           lastDoc,
           lastDocId: savedLastDocId,
         });
@@ -444,7 +402,7 @@ export default function CategoryPage() {
 
           lastDocsRef.current = { 1: null };
           res = await getProductsPageFirestore({
-            pageSize: isDesktop ? PAGE_SIZE : 6,
+            pageSize,
             category,
             subcategory: subcat,
             sort,
@@ -475,9 +433,7 @@ export default function CategoryPage() {
           });
         }
 
-        if (entryNavType !== "POP") {
-          requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
-        }
+        if (entryNavType !== "POP") requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
       } catch (e) {
         console.error(e);
         if (alive && myReqId === reqIdRef.current) setError(t("loadError"));
@@ -491,14 +447,14 @@ export default function CategoryPage() {
     return () => {
       alive = false;
     };
-  }, [category, subcat, sort, page, t, ctxKey, entryNavType, isDesktop]);
+  }, [category, subcat, sort, page, t, ctxKey, entryNavType, pageSize]);
 
   // snapshot para back
   useEffect(() => {
     if (!category || category === "ALL") return;
     if (loading) return;
 
-    const vKey = makeViewKey(category, subcat, sort, page);
+    const vKey = makeViewKey(category, subcat, sort, page, pageSize);
     viewCacheSet(vKey, {
       ts: Date.now(),
       items,
@@ -506,13 +462,14 @@ export default function CategoryPage() {
       lastDocByPage: { ...lastDocsRef.current },
       scrollY: typeof window !== "undefined" ? window.scrollY : 0,
     });
-  }, [category, subcat, sort, page, loading, items, hasNext]);
+  }, [category, subcat, sort, page, loading, items, hasNext, pageSize]);
 
   const lang = i18n.language;
   const mappedItems = useMemo(() => {
     if (!items?.length) return [];
     return items.map((p) => ({
       ...p,
+      dense: denseCards, // ✅ pásalo a tus cards si tu ProductGrid lo soporta
       title:
         lang === "en"
           ? p.title_en ?? p.title ?? p.Titulo
@@ -526,7 +483,7 @@ export default function CategoryPage() {
           ? p.shipping_fr ?? p.shipping
           : p.shipping_es ?? p.shipping,
     }));
-  }, [items, lang]);
+  }, [items, lang, denseCards]);
 
   const paginationCount = useMemo(() => (hasNext ? page + 1 : page), [hasNext, page]);
 
@@ -538,14 +495,11 @@ export default function CategoryPage() {
     [page, hasNext, updateParams]
   );
 
-  const onChangeSubcat = useCallback(
-    (v) => updateParams({ subcat: v, p: 1 }),
-    [updateParams]
-  );
+  const onChangeSubcat = useCallback((v) => updateParams({ subcat: v, p: 1 }), [updateParams]);
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
-      {/* ✅ Header solo desktop */}
+      {/* Header solo desktop */}
       {isDesktop ? (
         <Suspense fallback={null}>
           <Header queryText={queryText} onQueryChange={setQueryText} />
@@ -553,7 +507,6 @@ export default function CategoryPage() {
       ) : null}
 
       <Container maxWidth="lg" sx={{ px: { xs: 1, sm: 2 }, py: 3 }}>
-        {/* ✅ ESTA SECCIÓN AHORA SOLO DESKTOP (y SubcategoryBar no se descarga en móvil) */}
         <DesktopCategoryHero
           category={category}
           subcat={subcat}
@@ -574,13 +527,7 @@ export default function CategoryPage() {
             </Suspense>
 
             <Box sx={{ display: "flex", justifyContent: "center", mt: 2 }}>
-              <Pagination
-                count={paginationCount}
-                page={page}
-                onChange={onPageChange}
-                color="primary"
-                shape="rounded"
-              />
+              <Pagination count={paginationCount} page={page} onChange={onPageChange} color="primary" shape="rounded" />
             </Box>
           </Paper>
         )}

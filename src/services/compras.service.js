@@ -1,3 +1,4 @@
+// src/services/compras.service.js
 import {
   collection,
   doc,
@@ -8,6 +9,8 @@ import {
   limit,
   startAfter,
   serverTimestamp,
+  writeBatch,
+  
   setDoc,
   updateDoc,
 } from "firebase/firestore";
@@ -38,110 +41,195 @@ function mapDoc(d) {
   return { id: d.id, ...d.data() };
 }
 
-/**
- * ✅ Crear compra (guarda en 2 lugares):
- * - compradores/{userId}/miscompras/{compraId}
- * - compras/{compraId}
- */
-        
-                
- export const getCurrentTimestamp = () => Date.now();
+export const getCurrentTimestamp = () => Date.now();
 
+/* =========================================================
+   ✅ NUEVO FLUJO: RESERVA 48H (sin imagen)
+   - Guarda 1 doc por pedido en:
+     compradores/{userId}/miscompras/{compraId}
+     compras/{compraId}
+   - Estado: "PendientePago"
+   - ExpiresAt: ms (Date.now + 48h)
+========================================================= */
+
+function computeExpiresAtMs(hours = 48) {
+  return Date.now() + hours * 60 * 60 * 1000;
+}
+
+function isExpiredMs(expiresAtMs) {
+  return Number(expiresAtMs) > 0 && Date.now() > Number(expiresAtMs);
+}
+
+
+
+
+export async function createReservaDualFS({
+  userId,
+  compraId,
+  compraData,
+  userInfo,
+  descuento = 0,
+  total = 0,
+  envio = 0,
+  expiresInHours = 48,
+}) {
+  if (!userId) throw new Error("userId requerido");
+  if (!compraId) throw new Error("compraId requerido");
+
+  const nombre = String(userInfo?.nombre ?? "").trim();
+  const contacto = String(userInfo?.contacto ?? "").trim();
+  if (nombre.length < 3) throw new Error("Nombre inválido");
+  if (contacto.length < 6) throw new Error("Teléfono inválido");
+
+  const itemsArr = Array.isArray(compraData) ? compraData.filter(Boolean) : [];
+  if (!itemsArr.length) throw new Error("compraData vacía");
+
+  const idCompra = Number(compraId);
+  const Estado = "PendientePago";
+
+  const globalRef = doc(db, GLOBAL_PURCHASES_COL, String(idCompra));
+  const userItemsCol = collection(db, BUYERS_COL, String(userId), USER_PURCHASES_SUBCOL);
+
+  const batch = writeBatch(db);
+  const productosIds = [];
+
+  // 1) Guardar items en el usuario con autoId
+  for (const it of itemsArr) {
+    const itemRef = doc(userItemsCol); // genera autoId
+    productosIds.push(itemRef.id);
+
+    const { id, ...rest } = it || {};
+
+    batch.set(itemRef, {
+      ...rest,
+      Estado,
+      compraId: idCompra,          // ✅ clave
+  
+    });
+  }
+
+  // 2) Guardar cabecera global con punteros (Productos)
+  batch.set(globalRef, {
+    id: idCompra,
+    Fecha: idCompra,
+
+    Usuario: userId,
+    Estado,
+
+    nombre,
+    contacto,
+
+    Descuento: Number(descuento || 0),
+    Total: Number(total || 0),
+    Envio: Number(envio || 0),
+
+    ExpiresAt: Date.now() + expiresInHours * 3600 * 1000,
+
+    Productos: productosIds, // ✅ array de autoIds
+  });
+
+  await batch.commit();
+
+  return { success: true, compraId: idCompra, productosIds };
+}
+
+export async function getReservaGlobalFS({ compraId }) {
+  if (!compraId) throw new Error("compraId requerido");
+  const ref = doc(db, GLOBAL_PURCHASES_COL, String(compraId));
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() };
+}
+
+export async function expireReservaDualFS({ userId, compraId, reason = "Tiempo 48h sin pago" }) {
+  if (!userId) throw new Error("userId requerido");
+  if (!compraId) throw new Error("compraId requerido");
+
+  const globalRef = doc(db, GLOBAL_PURCHASES_COL, String(compraId));
+  const userRef = doc(db, BUYERS_COL, String(userId), USER_PURCHASES_SUBCOL, String(compraId));
+
+  const snap = await getDoc(globalRef);
+  if (!snap.exists()) return false;
+
+  const data = snap.data();
+  if (data?.Estado !== "PendientePago") return false;
+  if (!isExpiredMs(data?.ExpiresAt)) return false;
+
+  const patch = {
+    Estado: "Expirada",
+    ExpiredAt: serverTimestamp(),
+    ExpireReason: reason,
+    updatedAt: getCurrentTimestamp(),
+  };
+
+  await Promise.all([updateDoc(globalRef, patch), updateDoc(userRef, patch)]);
+  return true;
+}
+
+/* =========================================================
+   (Tu flujo viejo con imagen) — se mantiene intacto
+========================================================= */
 
 export async function createCompraDualFS({
   userId,
   compraId,
   compraData,
-  userInfo,     // opcional: si quieres forzar id (ej: orderId)
+  userInfo,
   img,
   descuento,
   total,
-  envio
+  envio,
 }) {
   if (!userId) throw new Error("userId requerido");
-    if (!img) throw new Error("img requerido");
+  if (!img) throw new Error("img requerido"); // 👈 viejo flujo (lo dejamos)
 
   if (!compraData || typeof compraData !== "object") throw new Error("compraData requerida");
   if (!userInfo || typeof userInfo !== "object") throw new Error("userInfo requerida");
 
-
   const globalPurchaseDocRef = (id) => doc(db, GLOBAL_PURCHASES_COL, String(id));
-  
   const userServiceDocRef = (uid, sid) =>
     doc(db, BUYERS_COL, String(uid), USER_PURCHASES_SUBCOL, String(sid));
 
-
-  //Eliminar
-  // const globalRef = globalPurchaseDocRef(compraId);
-  // const userRef = userPurchaseDocRef(userId, compraId);
   try {
-    // 1) idCompra
-    const idCompra = compraId ;
-    const estado = 'Verificando'
+    const idCompra = compraId;
+    const estado = "Verificando";
 
-    // 2) Guardar servicios en paralelo en: compradores/{uid}/miscompras/{idServicio}
     const serviciosArr = Array.isArray(compraData) ? compraData : [];
 
-  const serviciosPromises = serviciosArr.map(async (item) => {
-  const idServicio = getCurrentTimestamp();
+    const serviciosPromises = serviciosArr.map(async (item) => {
+      const idServicio = getCurrentTimestamp();
+      const { id, ...itemSinId } = item || {};
 
-  const { id, ...itemSinId } = item; // ⬅️ elimina `id` si existe
+      const servicioCompleto = {
+        ...itemSinId,
+        Codigo: Number(idCompra),
+        Fecha: Number(idCompra),
+        Usuario: userId,
+        Estado: estado,
+      };
 
-  const servicioCompleto = {
-    ...itemSinId,
-    Codigo:  Number(idCompra),
-    Fecha:  Number(idCompra),
-    Usuario: userId,
-    Estado: estado,
-  };
-
-  console.log(servicioCompleto);
-
-  await setDoc(
-    userServiceDocRef(userId, idServicio),
-    servicioCompleto,
-    { merge: false }
-  );
-
-  return idServicio;
-});
-
+      await setDoc(userServiceDocRef(userId, idServicio), servicioCompleto, { merge: false });
+      return idServicio;
+    });
 
     const idsCreados = await Promise.all(serviciosPromises);
 
-    // 3) Guardar compra global en: Compras/{idCompra}
     const globalRef = globalPurchaseDocRef(idCompra);
 
     const compraCompleta = {
       ...userInfo,
-
       id: Number(idCompra),
       Fecha: Number(idCompra),
-      img:img,
-
+      img: img,
       Servicios: idsCreados,
-        Estado:estado,
-        Usuario:userId,
-        Descuento:descuento,
-        Total: total,
-        Envio:envio
-
-
-     
-
-      // estados (compat)
-     
+      Estado: estado,
+      Usuario: userId,
+      Descuento: descuento,
+      Total: total,
+      Envio: envio,
     };
 
-    console.log(compraCompleta
-    
-    )
-
     await setDoc(globalRef, compraCompleta, { merge: false });
-
-    console.log(idCompra)
- 
-
 
     return { success: true, compraId: idCompra, serviciosIds: idsCreados };
   } catch (error) {
@@ -153,11 +241,7 @@ export async function createCompraDualFS({
 /**
  * ✅ Listar MISCOMPRAS del usuario con paginación (Fecha desc)
  */
-export async function getMisComprasPageFS({
-  userId,
-  pageSize = 12,
-  lastDoc = null,
-}) {
+export async function getMisComprasPageFS({ userId, pageSize = 12, lastDoc = null }) {
   const colRef = userPurchasesColRef(userId);
 
   const constraints = [orderBy("Fecha", "desc")];
@@ -189,14 +273,8 @@ export async function getCompraGlobalFS({ compraId }) {
 
 /**
  * ✅ Actualizar compra en ambos docs (sin borrar nunca)
- * Útil para: status, tracking, guía, notas, etc.
  */
-export async function updateCompraDualFS({
-  userId,
-  compraId,
-  patchGlobal = {},
-  patchUser = {},
-}) {
+export async function updateCompraDualFS({ userId, compraId, patchGlobal = {}, patchUser = {} }) {
   const now = getCurrentTimestamp();
 
   const globalRef = globalPurchaseDocRef(compraId);
@@ -211,11 +289,7 @@ export async function updateCompraDualFS({
 /**
  * ✅ Cancelar / anular compra (NO se borra)
  */
-export async function cancelCompraDualFS({
-  userId,
-  compraId,
-  reason = null,
-}) {
+export async function cancelCompraDualFS({ userId, compraId, reason = null }) {
   const now = getCurrentTimestamp();
 
   const globalRef = globalPurchaseDocRef(compraId);
@@ -240,14 +314,10 @@ export async function cancelCompraDualFS({
   return true;
 }
 
-
- export async function getCompraById(compradorId, compraId) {
- 
+export async function getCompraById(compradorId, compraId) {
   const ref = doc(db, BUYERS_COL, compradorId, USER_PURCHASES_SUBCOL, compraId);
   const snap = await getDoc(ref);
-
   if (!snap.exists()) return null;
-
   return { id: snap.id, ...snap.data() };
 }
 
@@ -256,14 +326,9 @@ export async function checkCompras({ userId }) {
 
   try {
     const comprasRef = collection(db, BUYERS_COL, userId, USER_PURCHASES_SUBCOL);
-
-    console.log(userId)
-    // solo intentamos leer 1 documento (más eficiente)
     const q = query(comprasRef, limit(1));
     const snap = await getDocs(q);
-    
-
-    return !snap.empty; // true si existe al menos un doc
+    return !snap.empty;
   } catch (error) {
     console.error("Error verificando miscompras:", error);
     return false;
