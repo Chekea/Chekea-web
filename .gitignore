@@ -26,3 +26,9 @@ dist-ssr
 *.sw?
 chekeaweb
 chekeaweb.pub
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example
