@@ -727,7 +727,7 @@ export default function ProductDetailsPage() {
     const pesoTipo = product.Peso ?? product.peso ?? "";
     const dimensionTipo = product.Dimension ?? product.dimension ?? "";
 
-    const {ship,peso} = estimateShippingFromProduct(shipCity, {
+    const {estimated,peso} = estimateShippingFromProduct(shipCity, {
       method: shipMethod,
       pesoTipo,
       dimensionTipo,
@@ -755,7 +755,7 @@ export default function ProductDetailsPage() {
       _finalPrice: finalPrice,
       shipDurationText: formatDuration(duration),
       vendedor: product.Vendedor,
-      shipEstimate: ship?.estimated ?? null,
+      shipEstimate:  estimated ?? null,
       rating: product.Rating ?? product.rating ?? "4.0",
       _productKey: productKey,
       Peso:peso,
