@@ -317,13 +317,14 @@ export async function getHomeSectionsFS({ size = 6 } = {}) {
 /**
  * ✅ Relacionados por categoría
  */
-export async function getRelatedProductsFS({ category, excludeId, pageSize = 8 }) {
+export async function getRelatedProductsFS({ category, excludeId, pageSize = 8,country='China' }) {
   if (!category) return [];
 
-  console.log(category)
+  console.log(category,country)
   const qy = query(
     collection(db, PRODUCTS_COL),
     where("Subcategoria", "==", category),
+    where('Pais','==',country),
     orderBy("Fecha", "desc"),
     limit(pageSize + 5)
   );

@@ -225,16 +225,7 @@ function isEquatorialGuineaCountry(value) {
 
 function getProductCountry(product) {
   return (
-    product?.Pais ??
-    product?.pais ??
-    product?.Country ??
-    product?.country ??
-    product?.PaisOrigen ??
-    product?.paisOrigen ??
-    product?.PaisDestino ??
-    product?.paisDestino ??
-    ""
-  );
+    product?.Pais );
 }
 
 function parseNumericWeight(value) {
@@ -805,6 +796,7 @@ export default function ProductDetailsPage() {
           ]);
 
           let rel2 = [];
+          console.log('id',p2.Pais)
           if (p2.Subcategoria) {
             rel2 = await getRelatedProductsFS({
               category: p2.Subcategoria,
@@ -852,6 +844,8 @@ export default function ProductDetailsPage() {
         if (p.Subcategoria) {
           rel = await getRelatedProductsFS({
             category: p.Subcategoria,
+                          country : p.Pais,
+
             excludeId: p.Codigo ?? p.id,
             pageSize: 4,
           });
