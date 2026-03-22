@@ -14,6 +14,8 @@ import CheckoutPage from "../pages/Checkoutpage";
 import FavoritesPage from "../pages/FavoritePage";
 import ProductDetailsPage from "../pages/ProductDetailspage";
 import CategoryPage from "../pages/CategoryPage";
+import CategoryPageEg from "../pages/new";
+
 import { authService } from "../services/auth.service";
 
 // ✅ Lazy solo para no críticas
@@ -79,6 +81,8 @@ export default function AppRouter({ initialRNState }) {
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/account" element={<AccountPage />} />
                 <Route path="/categoria" element={<CategoryPage />} />
+                <Route path="/cate" element={<CategoryPageEg />} />
+
 
                 {/* 🔥 CRÍTICA – sin lazy */}
                 <Route

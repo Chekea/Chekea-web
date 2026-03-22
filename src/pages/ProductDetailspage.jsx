@@ -68,7 +68,7 @@ import {
 const ProductGrid = lazy(() => import("../components/productgrid"));
 const Header = lazy(() => import("../components/header"));
 
-/* -------------------- helpers -------------------- */
+/* -------------------- local/session keys -------------------- */
 const LS_RECENTS = "chekea_recently_viewed_v1";
 const LS_SHIP_CITY = "chekea_ship_city_v1";
 const LS_SHIP_METHOD = "chekea_ship_method_v1";
@@ -76,6 +76,7 @@ const SS_VIEW_PREFIX = "chekea_viewed_once_v1:";
 
 /** hasPurchased por usuario (guardado desde CheckoutPage) */
 const HAS_PURCHASED_SESSION_KEY = "hasPurchasedByUser";
+
 function readHasPurchasedForUser(uid) {
   if (!uid) return null;
   try {
@@ -87,7 +88,7 @@ function readHasPurchasedForUser(uid) {
   }
 }
 
-/* -------------------- SIMPLE CACHE -------------------- */
+/* -------------------- simple cache -------------------- */
 const CACHE_PREFIX = "chekea_cache_v1:";
 const CACHE_TTL_MS = 2 * 60 * 1000;
 const MEM_CACHE = new Map();
@@ -95,24 +96,29 @@ const MEM_CACHE = new Map();
 function now() {
   return Date.now();
 }
+
 function isFresh(entry) {
   return entry && entry.expiresAt > now();
 }
+
 function cacheGet(key) {
-  const m = MEM_CACHE.get(key);
-  if (isFresh(m)) return { value: m.value, from: "memory" };
+  const memEntry = MEM_CACHE.get(key);
+  if (isFresh(memEntry)) return { value: memEntry.value, from: "memory" };
 
   try {
     const raw = sessionStorage.getItem(key);
     if (!raw) return null;
+
     const parsed = JSON.parse(raw);
     if (isFresh(parsed)) {
       MEM_CACHE.set(key, parsed);
       return { value: parsed.value, from: "session" };
     }
   } catch {}
+
   return null;
 }
+
 function cacheSet(key, value, ttlMs = CACHE_TTL_MS) {
   const entry = { value, expiresAt: now() + ttlMs };
   MEM_CACHE.set(key, entry);
@@ -125,12 +131,15 @@ function cacheSet(key, value, ttlMs = CACHE_TTL_MS) {
 function loadShipCity() {
   return sessionStorage.getItem(LS_SHIP_CITY) || "Malabo";
 }
+
 function saveShipCity(city) {
   sessionStorage.setItem(LS_SHIP_CITY, city);
 }
+
 function loadShipMethod() {
   return sessionStorage.getItem(LS_SHIP_METHOD) || "AIR";
 }
+
 function saveShipMethod(method) {
   sessionStorage.setItem(LS_SHIP_METHOD, method);
 }
@@ -143,26 +152,16 @@ function addRecentlyViewed(productId) {
   } catch {}
 }
 
-function shippingDuration(city, method) {
-  if (method === "SEA") return { type: "MONTHS", months: 3 };
-  const days = city === "Bata" ? 20 : 18;
-  return { type: "DAYS", days };
-}
-function formatDuration(d) {
-  if (!d) return "";
-  if (d.type === "MONTHS") return `${d.months} meses`;
-  return `${d.days} días`;
-}
-function getStylePrice(style) {
-  if (!style) return 0;
-  const v = style.precio ?? style.Precio ?? style.price ?? style.Price ?? 0;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-}
+/* -------------------- shipping constants -------------------- */
+const CITY_MALABO = "malabo";
+const CITY_BATA = "bata";
 
-/* -------------------- envío estimado -------------------- */
+const GE_BATA_FLAT_PRICE = 3000;
+const DEFAULT_FALLBACK_WEIGHT_KG = 1;
+
 const AIR_PRICE_PER_KG = 9000;
 const AIR_PRICE_PER_KG_BATA = 13000;
+const SEA_PRICE_PER_CBM = 170000;
 
 const PESOS = [
   { nombre: "Ultraligero", min: 0.1, max: 0.5 },
@@ -174,7 +173,6 @@ const PESOS = [
   { nombre: "Solo Barco", min: 7, max: 7 },
 ];
 
-const SEA_PRICE_PER_CBM = 170000;
 const DIMENSIONES = [
   { nombre: "Paquete pequeño", min: 0.023, max: 0.03 },
   { nombre: "Tamaño personal", min: 0.031, max: 0.15 },
@@ -187,40 +185,272 @@ const DIMENSIONES = [
   { nombre: "Cama y sofa", min: 3.101, max: 7.0 },
 ];
 
-function normKey(s) {
-  return String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+/* -------------------- shipping helpers -------------------- */
+function normalizeText(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
 }
 
-function estimateShippingFromProduct(city, { method, pesoTipo, dimensionTipo, qty }) {
-  const q = Math.max(1, Number(qty || 1));
+function normKey(value) {
+  return normalizeText(value);
+}
 
+function normalizeCity(value) {
+  const city = normalizeText(value);
+  if (city === CITY_MALABO) return "Malabo";
+  if (city === CITY_BATA) return "Bata";
+  return String(value ?? "").trim();
+}
+
+function isMalaboCity(value) {
+  return normalizeText(value) === CITY_MALABO;
+}
+
+function isBataCity(value) {
+  return normalizeText(value) === CITY_BATA;
+}
+
+function isEquatorialGuineaCountry(value) {
+  const country = normalizeText(value);
+  return (
+    country === "guinea ecuatorial" ||
+    country === "equatorial guinea" ||
+    country === "guinea-equatorial"
+  );
+}
+
+function getProductCountry(product) {
+  return (
+    product?.Pais ??
+    product?.pais ??
+    product?.Country ??
+    product?.country ??
+    product?.PaisOrigen ??
+    product?.paisOrigen ??
+    product?.PaisDestino ??
+    product?.paisDestino ??
+    ""
+  );
+}
+
+function parseNumericWeight(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function getPesoRangoMidpoint(pesoTipo) {
+  const key = normKey(pesoTipo);
+  const found = PESOS.find((x) => normKey(x.nombre) === key);
+  if (!found) return null;
+  return (found.min + found.max) / 2;
+}
+
+function getEstimatedWeightKg(product, pesoTipo) {
+  const directCandidates = [
+    product?.PesoKg,
+    product?.pesoKg,
+    product?.weightKg,
+    product?.WeightKg,
+    product?.kg,
+    product?.KG,
+    product?.peso_real,
+    product?.pesoReal,
+    product?.PesoReal,
+  ];
+
+  for (const candidate of directCandidates) {
+    const parsed = parseNumericWeight(candidate);
+    if (parsed) return parsed;
+  }
+
+  const mid = getPesoRangoMidpoint(pesoTipo);
+  if (mid) return mid;
+
+  return DEFAULT_FALLBACK_WEIGHT_KG;
+}
+
+function formatDuration(duration) {
+  if (!duration) return "";
+  if (duration.type === "MONTHS") return `${duration.months} meses`;
+  if (duration.type === "DAYS") return `${duration.days} días`;
+  return "";
+}
+
+function getStylePrice(style) {
+  if (!style) return 0;
+  const v = style.precio ?? style.Precio ?? style.price ?? style.Price ?? 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * ✅ Única fuente de verdad para toda la lógica de envío
+ */
+function resolveShipping({
+  city,
+  method,
+  pesoTipo,
+  dimensionTipo,
+  qty,
+  country,
+  product,
+}) {
+  const normalizedCity = normalizeCity(city);
+  const q = Math.max(1, Number(qty || 1));
+  const isGE = isEquatorialGuineaCountry(country);
+
+  // -------------------- Regla especial Guinea Ecuatorial --------------------
+  if (isGE) {
+    if (isMalaboCity(normalizedCity)) {
+      const duration = { type: "DAYS", days: 2 };
+
+      return {
+        city: "Malabo",
+        mode: method,
+        isSpecialRule: true,
+        country: "Guinea Ecuatorial",
+        estimated: 0,
+        peso: 0,
+        weightKg: 0,
+        duration,
+        durationText: formatDuration(duration),
+        label: "Guinea Ecuatorial - Malabo",
+        ignoreWeight: true,
+        ignoreDimension: true,
+        message: "Para Guinea Ecuatorial con destino Malabo el envío no tiene costo.",
+      };
+    }
+
+    if (isBataCity(normalizedCity)) {
+      const duration = { type: "DAYS", days: 2 };
+
+      return {
+        city: "Bata",
+        mode: method,
+        isSpecialRule: true,
+        country: "Guinea Ecuatorial",
+        estimated: GE_BATA_FLAT_PRICE,
+        peso: 0,
+        weightKg: 0,
+        duration,
+        durationText: formatDuration(duration),
+        label: "Guinea Ecuatorial - Bata",
+        ignoreWeight: true,
+        ignoreDimension: true,
+        message: "Para Guinea Ecuatorial con destino Bata el envío cuesta 3000 XFA.",
+      };
+    }
+
+    const duration = { type: "DAYS", days: 2 };
+
+    return {
+      city: normalizedCity,
+      mode: method,
+      isSpecialRule: true,
+      country: "Guinea Ecuatorial",
+      estimated: 0,
+      peso: 0,
+      weightKg: 0,
+      duration,
+      durationText: formatDuration(duration),
+      label: "Guinea Ecuatorial",
+      ignoreWeight: true,
+      ignoreDimension: true,
+      message: "Para productos de Guinea Ecuatorial aplican reglas especiales según la ciudad.",
+    };
+  }
+
+  // -------------------- Regla normal --------------------
   if (method === "AIR") {
     const key = normKey(pesoTipo);
     const found = PESOS.find((x) => normKey(x.nombre) === key);
-    if (!found) return null;
+
+    const days = isBataCity(normalizedCity) ? 20 : 18;
+    const duration = { type: "DAYS", days };
+
+    if (!found) {
+      const estimatedWeightKg = getEstimatedWeightKg(product, pesoTipo);
+      const pricePerKg = isBataCity(normalizedCity) ? AIR_PRICE_PER_KG_BATA : AIR_PRICE_PER_KG;
+      const estimated = Math.round(estimatedWeightKg * pricePerKg * q);
+
+      return {
+        city: normalizedCity,
+        mode: "AIR",
+        isSpecialRule: false,
+        estimated,
+        peso: estimatedWeightKg,
+        weightKg: estimatedWeightKg,
+        duration,
+        durationText: formatDuration(duration),
+        label: "Peso estimado",
+        warning: "Peso no reconocido exactamente, se usó una estimación.",
+        message: "Confirmamos el costo final con usted antes del despacho para más transparencia.",
+      };
+    }
 
     const mid = (found.min + found.max) / 2;
-    const estimated =
-      city === "Malabo"
-        ? Math.round(mid * AIR_PRICE_PER_KG * q)
-        : Math.round(mid * AIR_PRICE_PER_KG_BATA * q);
+    const pricePerKg = isBataCity(normalizedCity) ? AIR_PRICE_PER_KG_BATA : AIR_PRICE_PER_KG;
+    const estimated = Math.round(mid * pricePerKg * q);
 
-    return { mode: "AIR", label: found.nombre, estimated,peso:mid };
+    return {
+      city: normalizedCity,
+      mode: "AIR",
+      isSpecialRule: false,
+      estimated,
+      peso: mid,
+      weightKg: mid,
+      duration,
+      durationText: formatDuration(duration),
+      label: found.nombre,
+      message: "Confirmamos el costo final con usted antes del despacho para más transparencia.",
+    };
   }
 
   const key = normKey(dimensionTipo);
   const found = DIMENSIONES.find((x) => normKey(x.nombre) === key);
-  if (!found) return null;
+  const duration = { type: "MONTHS", months: 3 };
+
+  if (!found) {
+    return {
+      city: normalizedCity,
+      mode: "SEA",
+      isSpecialRule: false,
+      estimated: null,
+      peso: 0,
+      weightKg: 0,
+      duration,
+      durationText: formatDuration(duration),
+      label: null,
+      error: "Dimensión no reconocida",
+      message: "No se pudo calcular el envío porque la dimensión no es válida.",
+    };
+  }
 
   const mid = (found.min + found.max) / 2;
   const estimated = Math.round(mid * SEA_PRICE_PER_CBM * q);
 
-  return { mode: "SEA", label: found.nombre, estimated,peso:mid  };
+  return {
+    city: normalizedCity,
+    mode: "SEA",
+    isSpecialRule: false,
+    estimated,
+    peso: mid,
+    weightKg: 0,
+    duration,
+    durationText: formatDuration(duration),
+    label: found.nombre,
+    message: "Confirmamos el costo final con usted antes del despacho para más transparencia.",
+  };
 }
 
 /* -------------------- YouTube -------------------- */
 function YouTubeEmbed({ videoId, title = "Chekea Videos" }) {
   if (!videoId) return null;
+
   return (
     <Paper variant="outlined" sx={{ mt: 2, p: 1.5, borderRadius: 2 }}>
       <Typography sx={{ fontWeight: 900, mb: 1 }}>Video</Typography>
@@ -237,7 +467,9 @@ function YouTubeEmbed({ videoId, title = "Chekea Videos" }) {
         <Box
           component="iframe"
           loading="lazy"
-          src={`https://www.youtube.com/embed/${encodeURIComponent(videoId)}?rel=0&modestbranding=1`}
+          src={`https://www.youtube.com/embed/${encodeURIComponent(
+            videoId
+          )}?rel=0&modestbranding=1`}
           title={title}
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
           allowFullScreen
@@ -435,20 +667,23 @@ function BottomActionBar(props) {
   );
 }
 
-// ✅ helper idle
+/* -------------------- idle helpers -------------------- */
 function idle(cb) {
   if (typeof window === "undefined") return null;
   if ("requestIdleCallback" in window) return window.requestIdleCallback(cb, { timeout: 1200 });
   return window.setTimeout(cb, 250);
 }
+
 function cancelIdle(handle) {
   if (typeof window === "undefined" || handle == null) return;
+
   if ("cancelIdleCallback" in window && typeof handle !== "number") {
     try {
       window.cancelIdleCallback(handle);
     } catch {}
     return;
   }
+
   if (typeof handle === "number") clearTimeout(handle);
 }
 
@@ -467,22 +702,16 @@ export default function ProductDetailsPage() {
   const showLoginBarOnMobile = !isDesktop && !userId;
 
   const [hasPurchased, setHasPurchased] = useState(null);
-  useEffect(() => {
-    setHasPurchased(readHasPurchasedForUser(userId));
-  }, [userId]);
 
   const [product, setProduct] = useState(null);
   const [related, setRelated] = useState([]);
   const [colors, setColors] = useState([]);
   const [styles, setStyles] = useState([]);
-  const [images, setImages] = useState([]); // subcolección (defer)
+  const [images, setImages] = useState([]);
 
   const [selectedColor, setSelectedColor] = useState(null);
   const [selectedStyle, setSelectedStyle] = useState(null);
 
-  // ✅ active: null => cover
-  // o { kind:"gallery", id, urlDetail }
-  // o { kind:"real", url }
   const [active, setActive] = useState(null);
 
   const [shipCity, setShipCity] = useState(loadShipCity());
@@ -498,10 +727,20 @@ export default function ProductDetailsPage() {
   const [cartSaving, setCartSaving] = useState(false);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
 
-  useEffect(() => saveShipCity(shipCity), [shipCity]);
-  useEffect(() => saveShipMethod(shipMethod), [shipMethod]);
+  const reqIdRef = useRef(0);
 
-  // ✅ Preload header solo desktop (idle)
+  useEffect(() => {
+    setHasPurchased(readHasPurchasedForUser(userId));
+  }, [userId]);
+
+  useEffect(() => {
+    saveShipCity(shipCity);
+  }, [shipCity]);
+
+  useEffect(() => {
+    saveShipMethod(shipMethod);
+  }, [shipMethod]);
+
   useEffect(() => {
     if (!isDesktop) return;
     const h = idle(() => import("../components/header"));
@@ -513,9 +752,6 @@ export default function ProductDetailsPage() {
     return product.Codigo ?? product.id ?? id ?? null;
   }, [product, id]);
 
-  const reqIdRef = useRef(0);
-
-  /* -------------------- load product (CACHE + SWR) -------------------- */
   useEffect(() => {
     let alive = true;
     const myReqId = ++reqIdRef.current;
@@ -556,11 +792,9 @@ export default function ProductDetailsPage() {
       const cacheKey = `${CACHE_PREFIX}product_bundle:${id}`;
       const cached = cacheGet(cacheKey);
 
-      // ✅ 1) cache immediate + SWR refresh
       if (cached?.value) {
         hydrate(cached.value);
 
-        // SWR refresh (no bloquea)
         try {
           const p2 = await getProductByIdFS(id);
           if (!alive || myReqId !== reqIdRef.current || !p2) return;
@@ -574,6 +808,7 @@ export default function ProductDetailsPage() {
           if (p2.Subcategoria) {
             rel2 = await getRelatedProductsFS({
               category: p2.Subcategoria,
+              country : p2.Pais,
               excludeId: p2.Codigo ?? p2.id,
               pageSize: 4,
             });
@@ -583,7 +818,6 @@ export default function ProductDetailsPage() {
           cacheSet(cacheKey, bundle2);
           hydrate(bundle2);
 
-          // ✅ galería en idle
           const h = idle(async () => {
             try {
               const imgs2 = await getProductImagesFS(p2.id);
@@ -591,13 +825,12 @@ export default function ProductDetailsPage() {
               setImages(imgs2 ?? []);
             } catch {}
           });
-          // no need cancel; es breve
           void h;
         } catch {}
+
         return;
       }
 
-      // ✅ 2) no cache
       setLoading(true);
       resetUI();
 
@@ -628,7 +861,6 @@ export default function ProductDetailsPage() {
         cacheSet(cacheKey, bundle);
         hydrate(bundle);
 
-        // ✅ galería diferida
         idle(async () => {
           try {
             const imgs = await getProductImagesFS(p.id);
@@ -649,13 +881,13 @@ export default function ProductDetailsPage() {
     };
   }, [id]);
 
-  /* -------------------- view count (1 por sesión) -------------------- */
   useEffect(() => {
     if (!productKey) return;
 
     const job = () => {
       const viewKey = `${SS_VIEW_PREFIX}${productKey}`;
       if (sessionStorage.getItem(viewKey)) return;
+
       sessionStorage.setItem(viewKey, "1");
       updateViewCountFS(productKey).catch((e) => console.error("updateViewCountFS failed:", e));
     };
@@ -664,7 +896,6 @@ export default function ProductDetailsPage() {
     return () => cancelIdle(h);
   }, [productKey]);
 
-  /* -------------------- leer favorito existente -------------------- */
   useEffect(() => {
     if (!productKey) return;
 
@@ -698,7 +929,6 @@ export default function ProductDetailsPage() {
     };
   }, [productKey, userId]);
 
-  /* -------------------- mapped for UI -------------------- */
   const mapped = useMemo(() => {
     if (!product) return null;
 
@@ -722,17 +952,23 @@ export default function ProductDetailsPage() {
     const finalPrice =
       discount > 0 ? Number((basePrice * (1 - discount / 100)).toFixed(2)) : basePrice;
 
-    const duration = shippingDuration(shipCity, shipMethod);
-
+    const country = getProductCountry(product);
     const pesoTipo = product.Peso ?? product.peso ?? "";
     const dimensionTipo = product.Dimension ?? product.dimension ?? "";
 
-    const {estimated,peso} = estimateShippingFromProduct(shipCity, {
+    const shippingCalc = resolveShipping({
+      city: shipCity,
       method: shipMethod,
       pesoTipo,
       dimensionTipo,
       qty,
+      country,
+      product,
     });
+
+    const estimated = shippingCalc?.estimated ?? null;
+    const peso = shippingCalc?.peso ?? 0;
+    const isEquatorialGuinea = isEquatorialGuineaCountry(country);
 
     const imgreal = Boolean(product.Imgreal ?? product.imgreal ?? false);
     const imagenesrealesRaw =
@@ -753,22 +989,27 @@ export default function ProductDetailsPage() {
       _title: title,
       _details: rawDetails,
       _finalPrice: finalPrice,
-      shipDurationText: formatDuration(duration),
+      shipDurationText: shippingCalc?.durationText ?? "",
       vendedor: product.Vendedor,
-      shipEstimate:  estimated ?? null,
+      shipEstimate: estimated,
       rating: product.Rating ?? product.rating ?? "4.0",
       _productKey: productKey,
-      Peso:peso,
+      Peso: peso,
       Dimension: dimensionTipo,
       imgreal,
       imagenesreales: imgreal ? imagenesreales : [],
       youtubeId: product?.vid ?? null,
       Subcategoria: product.Subcategoria ?? product.subcategoria ?? "Otros",
+      country,
+      isEquatorialGuinea,
+      shippingRule: shippingCalc?.isSpecialRule ? "GE_SPECIAL" : "STANDARD",
+      shippingMeta: shippingCalc,
     };
   }, [product, i18n.language, shipCity, shipMethod, qty, productKey, selectedStyle]);
 
   const mappedRelated = useMemo(() => {
     const lang = i18n.language;
+
     return (related ?? []).map((p) => ({
       ...p,
       id: p.id ?? p.Codigo ?? p.codigo ?? p._id ?? p.docId,
@@ -783,17 +1024,15 @@ export default function ProductDetailsPage() {
     return () => cancelIdle(h);
   }, [mappedRelated.length]);
 
-  /* -------------------- Cover optimized URLs -------------------- */
   const coverUrls = useMemo(() => (product ? getCoverUrls(product) : null), [product]);
+
   const coverSrcSet = useMemo(() => (product ? buildCoverSrcSet(product) : ""), [product]);
 
   const coverInitialSrc = useMemo(() => {
     if (!product) return null;
-    // móvil empieza con thumb, desktop con card
     return pickCoverUrl(product, { prefer: isDesktop ? "card" : "thumb" });
   }, [product, isDesktop]);
 
-  /* -------------------- gallery thumbs (variants) -------------------- */
   const galleryThumbs = useMemo(() => {
     return (images ?? [])
       .map((d) => {
@@ -803,7 +1042,6 @@ export default function ProductDetailsPage() {
       .filter((x) => x.thumb || x.detail);
   }, [images]);
 
-  // JPG reales (si existen) => limitamos a 2
   const realThumbs = useMemo(() => {
     return (mapped?.imagenesreales ?? []).filter(Boolean).slice(0, 2);
   }, [mapped?.imagenesreales]);
@@ -817,7 +1055,6 @@ export default function ProductDetailsPage() {
 
   const qtyOptions = useMemo(() => Array.from({ length: 9 }, (_, i) => i + 1), []);
 
-  /* -------------------- favorites toggle -------------------- */
   const toggleFavoriteFS = useCallback(async () => {
     if (!mapped?._productKey) return;
 
@@ -825,33 +1062,39 @@ export default function ProductDetailsPage() {
       nav("/login");
       return;
     }
+
     if (favBusy) return;
 
     const productId = mapped._productKey;
     const subcategoria = mapped.Subcategoria ?? "Otros";
-
     const next = !wishOn;
+
     setWishOn(next);
     setFavBusy(true);
 
     try {
       if (next) {
         await addInteraccionFS({ userId, subcategoria, productId, cantidad: 2 });
+
         const newFavId = await addToFavoritesFS({
           userId,
           productId,
           productData: mapped,
         });
+
         setFavoritoId(newFavId || "");
       } else {
         let idToDelete = favoritoId;
+
         if (!idToDelete) {
           const fav = await getFavoriteRefFromProductFS({ userId, productId });
           idToDelete = fav?.id ?? fav?.idDoc ?? "";
         }
+
         if (idToDelete) {
           await removeFromFavoritesFS({ favoritoId: idToDelete, userId, productId });
         }
+
         setFavoritoId("");
       }
     } catch (e) {
@@ -862,114 +1105,13 @@ export default function ProductDetailsPage() {
     }
   }, [mapped, userId, nav, wishOn, favoritoId, favBusy]);
 
-  /* -------------------- cart add -------------------- */
-  const addToCart = useCallback(async () => {
-    if (!mapped) return;
+  const buildOrderDetails = useCallback(() => {
+    if (!mapped) return "";
 
-    if (!userId) {
-      nav("/login");
-      return;
-    }
-
-    setCartSaving(true);
-    try {
-      const Titulo = mapped._title ?? "Producto";
-      const Vendedor = mapped.vendedor;
-      const producto = mapped._productKey;
-
-      const precioReal = Number(mapped._finalPrice ?? 0);
-      const url = window.location.href;
-
-      // ✅ usa image optimizada actual (si es cover, usa card/thumb)
-      const Img =
-        active?.kind === "gallery"
-          ? active.url
-          : active?.kind === "real"
-          ? active.url
-          : coverUrls?.card || coverUrls?.thumb || mapped.Imagen || "";
-
-      const Detalles = [
-        shipCity ? `Envío a: ${shipCity}` : null,
-        mapped.shipDurationText ? `Entrega: ${mapped.shipDurationText}` : null,
-        selectedColor
-          ? `Color: ${
-              selectedColor.nombre ??
-              selectedColor.name ??
-              selectedColor.label ??
-              selectedColor.Nombre ??
-              ""
-            }`
-          : null,
-        selectedStyle
-          ? `Estilo: ${
-              selectedStyle.nombre ??
-              selectedStyle.name ??
-              selectedStyle.label ??
-              selectedStyle.Nombre ??
-              ""
-            }`
-          : null,
-      ]
-        .filter(Boolean)
-        .join(" • ");
-
-      await cart.add({
-        Producto: producto,
-        Titulo,
-        Precio: precioReal,
-        Img,
-        Vendedor,
-        Ciudad:shipCity,
-Peso: (mapped.Peso ?? 0) * qty,
-        qty,
-        Detalles,
-        link: url,
-      });
-
-      await addInteraccionFS({
-        userId,
-        subcategoria: mapped.Subcategoria ?? "Otros",
-        producto,
-        cantidad: 4,
-      });
-    } finally {
-      setCartSaving(false);
-    }
-  }, [
-    mapped,
-    active,
-    coverUrls,
-    nav,
-    cart,
-    qty,
-    shipCity,
-    selectedColor,
-    selectedStyle,
-    userId,
-  ]);
-
-  const comprarahora = useCallback(() => {
-    if (!mapped) return;
-
-    if (!userId) {
-      nav("/login");
-      return;
-    }
-
-    const url = window.location.href;
-    const Envio = Number(mapped.shipEstimate ?? 0);
-
-    const Img =
-      active?.kind === "gallery"
-        ? active.url
-        : active?.kind === "real"
-        ? active.url
-        : coverUrls?.card || coverUrls?.thumb || mapped.Imagen || "";
-
-    const Detalles = [
+    return [
       shipCity ? `Envío a: ${shipCity}` : null,
       mapped.shipDurationText ? `Entrega: ${mapped.shipDurationText}` : null,
-      
+      mapped.isEquatorialGuinea ? `Regla especial: Guinea Ecuatorial` : null,
       selectedColor
         ? `Color: ${
             selectedColor.nombre ??
@@ -991,49 +1133,105 @@ Peso: (mapped.Peso ?? 0) * qty,
     ]
       .filter(Boolean)
       .join(" • ");
+  }, [mapped, shipCity, selectedColor, selectedStyle]);
+
+  const buildSelectedImage = useCallback(() => {
+    if (!mapped) return "";
+
+    if (active?.kind === "gallery") return active.url;
+    if (active?.kind === "real") return active.url;
+    return coverUrls?.card || coverUrls?.thumb || mapped.Imagen || "";
+  }, [active, coverUrls, mapped]);
+
+  const addToCart = useCallback(async () => {
+    if (!mapped) return;
+
+    if (!userId) {
+      nav("/login");
+      return;
+    }
+
+    setCartSaving(true);
+
+    try {
+      const Titulo = mapped._title ?? "Producto";
+      const Vendedor = mapped.vendedor;
+      const producto = mapped._productKey;
+      const precioReal = Number(mapped._finalPrice ?? 0);
+      const url = window.location.href;
+      const Img = buildSelectedImage();
+      const Detalles = buildOrderDetails();
+
+      await cart.add({
+        Producto: producto,
+        Titulo,
+        Precio: precioReal,
+        Img,
+        Vendedor,
+        Ciudad: shipCity,
+        Peso: (mapped.Peso ?? 0) * qty,
+        qty,
+        Detalles,
+        link: url,
+      });
+
+      await addInteraccionFS({
+        userId,
+        subcategoria: mapped.Subcategoria ?? "Otros",
+        producto,
+        cantidad: 4,
+      });
+    } finally {
+      setCartSaving(false);
+    }
+  }, [mapped, userId, nav, cart, qty, shipCity, buildSelectedImage, buildOrderDetails]);
+
+  const comprarahora = useCallback(() => {
+    if (!mapped) return;
+
+    if (!userId) {
+      nav("/login");
+      return;
+    }
+
+    const url = window.location.href;
+    const Img = buildSelectedImage();
+    const Detalles = buildOrderDetails();
 
     const buyNowItem = {
       Producto: mapped._productKey,
       Titulo: mapped._title ?? "Producto",
       Precio: Number(mapped._finalPrice ?? 0),
-Peso: (mapped.Peso ?? 0) * qty,
+      Peso: (mapped.Peso ?? 0) * qty,
       Img,
       Vendedor: mapped.vendedor,
       qty,
       Detalles,
-      Ciudad:shipCity,
-
+      Ciudad: shipCity,
       link: url,
       sub: mapped.Subcategoria ?? "Otros",
+      shippingRule: mapped.shippingRule,
+      shippingCost: mapped.shipEstimate ?? 0,
     };
 
     nav("/checkout", { state: { buyNowItem } });
-  }, [
-    mapped,
-    userId,
-    nav,
-    active,
-    coverUrls,
-    qty,
-    shipCity,
-    selectedColor,
-    selectedStyle,
-  ]);
+  }, [mapped, userId, nav, qty, shipCity, buildSelectedImage, buildOrderDetails]);
 
   const onShare = useCallback(async () => {
     if (!mapped) return;
+
     const url = window.location.href;
+
     try {
-      if (navigator.share) await navigator.share({ title: mapped._title, url });
-      else {
+      if (navigator.share) {
+        await navigator.share({ title: mapped._title, url });
+      } else {
         await navigator.clipboard.writeText(url);
         alert("Link copiado");
       }
     } catch {}
   }, [mapped]);
 
-  // ✅ imagen principal: si active es gallery/real => usa esa URL,
-  // si no => cover (con srcSet)
   const mainImgSrc = useMemo(() => {
     if (active?.kind === "gallery") return active.url;
     if (active?.kind === "real") return active.url;
@@ -1084,12 +1282,10 @@ Peso: (mapped.Peso ?? 0) * qty,
                   gap: 2,
                 }}
               >
-                {/* Image + gallery */}
                 <Box>
                   <Box sx={{ position: "relative" }}>
                     <img
                       src={mainImgSrc}
-                      // ✅ srcSet SOLO para cover (active=null)
                       srcSet={!active ? coverSrcSet : undefined}
                       sizes={isDesktop ? "420px" : "100vw"}
                       alt={mapped._title}
@@ -1105,10 +1301,8 @@ Peso: (mapped.Peso ?? 0) * qty,
                     />
                   </Box>
 
-                  {/* Thumbs */}
                   {(coverUrls?.thumb || galleryThumbs.length > 0) && (
                     <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: "wrap" }}>
-                      {/* cover thumb */}
                       {coverUrls?.thumb && (
                         <Box
                           key="thumb-cover"
@@ -1120,7 +1314,9 @@ Peso: (mapped.Peso ?? 0) * qty,
                             overflow: "hidden",
                             cursor: "pointer",
                             border:
-                              active == null ? "2px solid rgba(0,0,0,0.5)" : "1px solid rgba(0,0,0,0.12)",
+                              active == null
+                                ? "2px solid rgba(0,0,0,0.5)"
+                                : "1px solid rgba(0,0,0,0.12)",
                           }}
                         >
                           <img
@@ -1165,7 +1361,6 @@ Peso: (mapped.Peso ?? 0) * qty,
                     </Stack>
                   )}
 
-                  {/* Imágenes reales (JPG) limitadas */}
                   {mapped.imgreal && realThumbs.length > 0 && (
                     <Paper variant="outlined" sx={{ mt: 2, p: 1.5, borderRadius: 2 }}>
                       <Typography sx={{ fontWeight: 900, mb: 1 }}>Imágenes reales</Typography>
@@ -1180,7 +1375,10 @@ Peso: (mapped.Peso ?? 0) * qty,
                               borderRadius: 2,
                               overflow: "hidden",
                               cursor: "pointer",
-                              border: "1px solid rgba(0,0,0,0.12)",
+                              border:
+                                active?.kind === "real" && active.url === url
+                                  ? "2px solid rgba(0,0,0,0.5)"
+                                  : "1px solid rgba(0,0,0,0.12)",
                             }}
                           >
                             <img
@@ -1201,7 +1399,6 @@ Peso: (mapped.Peso ?? 0) * qty,
                   <YouTubeEmbed videoId={mapped.youtubeId} title={mapped._title} />
                 </Box>
 
-                {/* Info */}
                 <Box>
                   <Typography variant="h5" sx={{ fontWeight: 900 }}>
                     {mapped._title}
@@ -1217,13 +1414,11 @@ Peso: (mapped.Peso ?? 0) * qty,
                       <Typography sx={{ fontWeight: 900 }}>{mapped.rating}</Typography>
                     </Stack>
 
-                    {/* <Chip
-                      size="small"
-                      label={`Visitas:${mapped.Vistos !== undefined ? mapped.Vistos : 50}`}
-                      variant="outlined"
-                    /> */}
                     <Chip size="small" label="Compra Internacional" variant="outlined" />
                     <Chip size="small" label="Envíos a Malabo/Bata" variant="outlined" />
+                    {mapped.isEquatorialGuinea && (
+                      <Chip size="small" label="Guinea Ecuatorial • 2 días" color="success" />
+                    )}
                   </Stack>
 
                   <Box sx={{ mt: 1 }}>
@@ -1351,30 +1546,38 @@ Peso: (mapped.Peso ?? 0) * qty,
                       <FlightTakeoffIcon sx={{ mr: 1 }} />
                       Aéreo
                     </ToggleButton>
+                    {/* Si luego quieres activar marítimo, ya está soportado por resolveShipping */}
+                    {/* <ToggleButton value="SEA">
+                      <LocalShippingIcon sx={{ mr: 1 }} />
+                      Marítimo
+                    </ToggleButton> */}
                   </ToggleButtonGroup>
 
                   <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
                     <LocalShippingIcon fontSize="small" />
                     <Typography sx={{ color: "text.secondary" }}>
                       Entrega estimada: <b>{mapped.shipDurationText}</b> a <b>{shipCity}</b>
+                      {mapped.isEquatorialGuinea ? " • Regla especial para Guinea Ecuatorial" : ""}
                     </Typography>
                   </Stack>
 
                   <Typography sx={{ color: "text.secondary", mt: 0.5 }}>
-                   Costo de Envio estimado ({shipMethod === "AIR" ? "Aéreo" : "Marítimo"}):{" "}
+                    Costo de Envío estimado ({shipMethod === "AIR" ? "Aéreo" : "Marítimo"}):{" "}
                     <b>
                       {mapped.shipEstimate != null
                         ? `XFA ${puntodecimal(mapped.shipEstimate)}`
                         : "No disponible"}
-                    </b>{" "}
+                    </b>
                   </Typography>
-                   <Typography sx={{ color: "text.secondary" }}>
-Confirmamos el costo final con usted antes del despacho para mas transparencia.                    
-</Typography>
+
+                  <Typography sx={{ color: "text.secondary" }}>
+                    {mapped.shippingMeta?.message ??
+                      "Confirmamos el costo final con usted antes del despacho para más transparencia."}
+                  </Typography>
 
                   <BottomActionBar
                     cartSaving={cartSaving}
-                    disableColorRequired={colors.length > 0 && !selectedColor}
+                    disableColorRequired={disableColorRequired}
                     comprarahora={comprarahora}
                     addToCart={addToCart}
                     wishOn={wishOn}
@@ -1383,7 +1586,7 @@ Confirmamos el costo final con usted antes del despacho para mas transparencia.
                     onShare={onShare}
                   />
 
-                  <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
+                  <Stack direction="row" spacing={1} sx={{ mt: 2, flexWrap: "wrap" }}>
                     <Chip icon={<VerifiedUserIcon />} label="Compra protegida" />
                     <Chip icon={<ReplayIcon />} label="Devolución 7 días" />
                   </Stack>

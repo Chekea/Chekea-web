@@ -106,10 +106,12 @@ export async function getProductsPageFirestore({
 
   if (category && category !== "ALL") constraints.push(where("Categoria", "==", category));
 
+
   if (subcategory && subcategory !== "ALL") {
     if (subcategory === "Masculina") constraints.push(where("Genero", "==", "Masculina"));
     else constraints.push(where("Subcategoria", "==", subcategory));
   }
+
 
   if (qText) constraints.push(where("searchKeywords", "array-contains", qText));
 
@@ -150,6 +152,122 @@ export async function getProductsPageFirestore({
   };
 }
 
+export async function getProductsPageEG({
+  pageSize = 12,
+  category = "ALL",
+  sort = "newest",
+  queryText = "",
+  lastDoc = null,
+  lastDocId = null,
+}) {
+  const qText = normalizeQueryText(queryText);
+  const { field, dir } = buildSort(sort);
+
+  const colRef = collection(db, PRODUCTS_COL);
+  const constraints = [];
+    constraints.push(where("Pais", "==", 'Guinea Ecuatorial'));
+
+  constraints.push(where("Categoria", "==", category));
+
+
+ 
+  constraints.push(orderBy(field, dir));
+
+  // ✅ si me pasan id, recupero el snapshot
+  let effectiveLastDoc = lastDoc;
+  if (!effectiveLastDoc && lastDocId) {
+    try {
+      const snap = await getDoc(doc(db, PRODUCTS_COL, lastDocId));
+      if (snap.exists()) effectiveLastDoc = snap;
+    } catch {
+      // si el doc ya no existe, ignora cursor
+      effectiveLastDoc = null;
+    }
+  }
+
+  if (effectiveLastDoc) constraints.push(startAfter(effectiveLastDoc));
+
+  constraints.push(limit(pageSize + 1));
+
+  const qy = query(colRef, ...constraints);
+  const snap = await getDocs(qy);
+
+  const docs = snap.docs;
+  const hasNext = docs.length > pageSize;
+
+  const slice = docs.slice(0, pageSize);
+  const items = slice.map(mapDocCard);
+  console.log(items)
+
+  const nextLastDoc = slice.length ? slice[slice.length - 1] : effectiveLastDoc;
+
+  return {
+    items,
+    hasNext,
+    lastDoc: nextLastDoc,
+    lastDocId: nextLastDoc ? nextLastDoc.id : lastDocId,
+  };
+}
+export async function getProductsByCountry({
+  pageSize = 12,
+  country = null,
+  lastDoc = null,
+  lastDocId = null,
+  categoria = 'Creacion de Contenido'
+}) {
+  const colRef = collection(db, PRODUCTS_COL);
+  const constraints = [];
+
+  // 🔹 filtro SOLO por país
+  if (country && country !== "ALL") {
+    constraints.push(where("Pais", "==", country));
+        constraints.push(where("Categoria", "==", categoria));
+
+  }
+
+  // 🔹 orden básico (puedes cambiar el campo si quieres)
+  constraints.push(orderBy("Fecha", "asc"));
+
+  // 🔹 recuperar cursor si viene por ID
+  let effectiveLastDoc = lastDoc;
+  if (!effectiveLastDoc && lastDocId) {
+    try {
+      const snap = await getDoc(doc(db, PRODUCTS_COL, lastDocId));
+      if (snap.exists()) effectiveLastDoc = snap;
+    } catch {
+      effectiveLastDoc = null;
+    }
+  }
+
+  // 🔹 paginación
+  if (effectiveLastDoc) {
+    constraints.push(startAfter(effectiveLastDoc));
+  }
+
+  constraints.push(limit(pageSize + 1));
+
+  const qy = query(colRef, ...constraints);
+  const snap = await getDocs(qy);
+
+  const docs = snap.docs;
+  const hasNext = docs.length > pageSize;
+
+  const slice = docs.slice(0, pageSize);
+  const items = slice.map(mapDocCard);
+
+  const nextLastDoc = slice.length
+    ? slice[slice.length - 1]
+    : effectiveLastDoc;
+
+    console.log(items)
+
+  return {
+    items,
+    hasNext,
+    lastDoc: nextLastDoc,
+    lastDocId: nextLastDoc ? nextLastDoc.id : lastDocId,
+  };
+}
 export async function getProductByIdFirestore(id) {
   const ref = doc(db, PRODUCTS_COL, id);
   const snap = await getDoc(ref);

@@ -748,7 +748,7 @@ async function enqueueNextPage({ req, functionPath, payload }) {
  * Uso:
  *  curl -X POST "http://127.0.0.1:5001/<project>/us-central1/optimizeSubcategoryAuto" \
  *    -H "Content-Type: application/json" \
- *    -d '{"subcat":"Vestidos","pageSize":20,"concurrency":3}'
+ *    -d '{"subcat":"Moda & Accesorios","pageSize":20,"concurrency":3}'
  * =========================================
  */
 exports.optimizeSubcategoryAuto = onRequest(
@@ -760,7 +760,7 @@ exports.optimizeSubcategoryAuto = onRequest(
       const subcatRaw =
         (typeof req.query.subcat === "string" && req.query.subcat) ||
         (typeof req.body?.subcat === "string" && req.body.subcat) ||
-        "Vestidos";
+        "Guinea Ecuatorial";
 
       const subcatNeedle = normalizeSubcat(subcatRaw);
 
@@ -890,8 +890,8 @@ exports.optimizeSubcategoryAuto = onRequest(
 
         const matchedDocs = [];
         for (const d of docs) {
-          const data = d.data() || {};
-          const s = normalizeSubcat(data.Subcategoria);
+          const data = d.data() || {}; 
+          const s = normalizeSubcat(data.Pais);
           if (s === subcatNeedle) matchedDocs.push(d);
         }
 
@@ -968,7 +968,7 @@ exports.optimizeSubcategoryAuto = onRequest(
         const subcatRaw =
           (typeof req.query.subcat === "string" && req.query.subcat) ||
           (typeof req.body?.subcat === "string" && req.body.subcat) ||
-          "Vestidos";
+          "Guinea Ecuatorial";
 
         const jobId = jobIdForSubcat(subcatRaw);
         const jobRef = db.collection(JOBS_COLLECTION).doc(jobId);

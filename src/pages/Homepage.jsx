@@ -1,10 +1,4 @@
-// ✅ HomePage.jsx (Optimizado)
-// - Iconos tipo burbuja (CategoryIconsBar) -> cambia cat + subcat
-// - ALL usa getHomeSectionsFS() (nuevo/descuentos/relevantes) ya vienen con 6
-// - descuentos con countdown 24h + reiniciar
-// - sección "Recomendados para ti" abajo (sin duplicar items de ALL cuando aplica)
-// - paginación con caché por página + lastDoc encadenado
-
+// HomePage.jsx
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
   Container,
@@ -16,7 +10,17 @@ import {
   Stack,
   Button,
   Chip,
+  Divider,
+  CircularProgress,
 } from "@mui/material";
+import LocalShippingRoundedIcon from "@mui/icons-material/LocalShippingRounded";
+import AccessTimeFilledRoundedIcon from "@mui/icons-material/AccessTimeFilledRounded";
+import Inventory2RoundedIcon from "@mui/icons-material/Inventory2Rounded";
+import PlaceRoundedIcon from "@mui/icons-material/PlaceRounded";
+import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
+import WhatshotRoundedIcon from "@mui/icons-material/WhatshotRounded";
+import AutoAwesomeRoundedIcon from "@mui/icons-material/AutoAwesomeRounded";
+
 import { useTranslation } from "react-i18next";
 import { useSearchParams, useNavigate } from "react-router-dom";
 
@@ -29,11 +33,11 @@ import SubcategoryBar from "../components/subcategorybar";
 import {
   getProductsPageFirestore,
   getHomeSectionsFS,
+  getProductsByCountry,
 } from "../services/product.firesore.service";
 import { useEffectiveAuth } from "../state/useEffectiveAuth";
 
-/** helpers */
-function clampInt(v, fallback, min = 1, max = 100_000) {
+function clampInt(v, fallback, min = 1, max = 100000) {
   const n = Number.parseInt(String(v ?? ""), 10);
   if (Number.isNaN(n)) return fallback;
   return Math.min(max, Math.max(min, n));
@@ -46,64 +50,187 @@ const SUBCATS_BY_CAT = {
   Hogar: ["Cocina", "Decoración", "Baño", "Sala de estar", "Dormitorio", "Iluminacion"],
 };
 
-const MS_24H = 24 * 60 * 60 * 1000;
-const DISCOUNT_DEADLINE_KEY = "chekea_discount_24h_deadline_ms";
-
-function pad2(n) {
-  return String(n).padStart(2, "0");
+function normalizeProduct(p, lang) {
+  return {
+    ...p,
+    id: p.id ?? p._id ?? crypto.randomUUID(),
+    title:
+      lang === "en"
+        ? p.title_en ?? p.titleEn ?? p.title ?? p.Titulo ?? ""
+        : lang === "fr"
+          ? p.title_fr ?? p.titleFr ?? p.title ?? p.Titulo ?? ""
+          : p.title_es ?? p.title ?? p.Titulo ?? "",
+    shipping:
+      lang === "en"
+        ? p.shipping_en ?? p.shippingEn ?? p.shipping ?? ""
+        : lang === "fr"
+          ? p.shipping_fr ?? p.shippingFr ?? p.shipping ?? ""
+          : p.shipping_es ?? p.shipping ?? "",
+    image:
+      p.image ??
+      p.imagen ??
+      p.thumbnail ??
+      p.photo ??
+      p.foto ??
+      p.images?.[0] ??
+      p.Imagen ??
+      "",
+    price:
+      p.price ??
+      p.precio ??
+      p.Precio ??
+      p.priceValue ??
+      0,
+    country: p.country ?? p.Pais ?? "",
+  };
 }
-function formatMsToHMS(ms) {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  return `${pad2(h)}:${pad2(m)}:${pad2(s)}`;
+
+function SectionHeader({
+  eyebrow,
+  title,
+  subtitle,
+  actionLabel,
+  onAction,
+  accent = "primary",
+  rightNode = null,
+}) {
+  return (
+    <Stack
+      direction={{ xs: "column", md: "row" }}
+      alignItems={{ xs: "flex-start", md: "center" }}
+      justifyContent="space-between"
+      spacing={2}
+      sx={{ mb: 2 }}
+    >
+      <Box>
+        {eyebrow ? (
+          <Chip
+            label={eyebrow}
+            size="small"
+            color={accent}
+            sx={{ mb: 1, fontWeight: 700 }}
+          />
+        ) : null}
+
+        <Typography
+          variant="h5"
+          sx={{
+            fontWeight: 900,
+            letterSpacing: "-0.02em",
+            fontSize: { xs: "1.25rem", md: "1.65rem" },
+          }}
+        >
+          {title}
+        </Typography>
+
+        {subtitle ? (
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{ mt: 0.5, maxWidth: 760 }}
+          >
+            {subtitle}
+          </Typography>
+        ) : null}
+      </Box>
+
+      <Stack direction="row" spacing={1} alignItems="center">
+        {rightNode}
+        {actionLabel ? (
+          <Button
+            variant="text"
+            onClick={onAction}
+            endIcon={<ArrowForwardRoundedIcon />}
+            sx={{ fontWeight: 800 }}
+          >
+            {actionLabel}
+          </Button>
+        ) : null}
+      </Stack>
+    </Stack>
+  );
 }
 
-console.log("MODE:", import.meta.env.MODE);
-console.log("ALL ENV:", import.meta.env,'HOLA');
- 
+function SectionBlock({
+  title,
+  subtitle,
+  items,
+  loading,
+  actionLabel,
+  onAction,
+  eyebrow,
+  accent = "primary",
+  emptyText = "No hay productos disponibles por ahora.",
+  rightNode = null,
+}) {
+  return (
+    <Paper
+      elevation={0}
+      sx={{
+        p: { xs: 1.5, md: 2 },
+        borderRadius: 4,
+        border: "1px solid",
+        borderColor: "divider",
+        bgcolor: "background.paper",
+      }}
+    >
+      <SectionHeader
+        title={title}
+        subtitle={subtitle}
+        actionLabel={actionLabel}
+        onAction={onAction}
+        eyebrow={eyebrow}
+        accent={accent}
+        rightNode={rightNode}
+      />
+
+      {loading ? (
+        <Box sx={{ minHeight: 220, display: "grid", placeItems: "center" }}>
+          <Stack spacing={1.5} alignItems="center">
+            <CircularProgress size={28} />
+            <Typography variant="body2" color="text.secondary">
+              Cargando productos...
+            </Typography>
+          </Stack>
+        </Box>
+      ) : items?.length ? (
+        <ProductGrid items={items} />
+      ) : (
+        <Box sx={{ py: 2 }}>
+          <EmptyState title="Sin resultados" subtitle={emptyText} />
+        </Box>
+      )}
+    </Paper>
+  );
+}
 
 export default function HomePage() {
   const { t, i18n } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const nav = useNavigate();
-const { user } = useEffectiveAuth();
-const userId = user?.uid ?? null;
-
+  const { user } = useEffectiveAuth();
+  const userId = user?.uid ?? null;
 
   const category = searchParams.get("cat") ?? "ALL";
   const subcat = searchParams.get("subcat") ?? "ALL";
   const sort = searchParams.get("sort") ?? "relevance";
   const pageSize = clampInt(searchParams.get("size"), 12, 4, 60);
   const page = clampInt(searchParams.get("p"), 1, 1, 100000);
-
   const isAll = category === "ALL";
 
   const [queryText, setQueryText] = useState("");
-
-  // normal list
   const [items, setItems] = useState([]);
   const [hasNext, setHasNext] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // ALL sections
   const [newItems, setNewItems] = useState([]);
-  const [discountItems, setDiscountItems] = useState([]);
-  const [relevantItems, setRelevantItems] = useState([]);
   const [loadingAll, setLoadingAll] = useState(false);
 
-  // recommended bottom
-  const [recommendedItems, setRecommendedItems] = useState([]);
-  const [loadingRec, setLoadingRec] = useState(false);
+  const [localGQItems, setLocalGQItems] = useState([]);
+  const [loadingLocalGQ, setLoadingLocalGQ] = useState(false);
 
   const [error, setError] = useState("");
 
-  // countdown
-  const [discountDeadlineMs, setDiscountDeadlineMs] = useState(null);
-  const [msLeft, setMsLeft] = useState(0);
-
-  // pagination cache refs
   const pagesRef = useRef({});
   const lastDocsRef = useRef({ 1: null });
   const hasNextByPageRef = useRef({});
@@ -112,10 +239,12 @@ const userId = user?.uid ?? null;
   const updateParams = useCallback(
     (patch) => {
       const next = new URLSearchParams(searchParams);
+
       Object.entries(patch).forEach(([k, v]) => {
         if (v === null || v === undefined || v === "") next.delete(k);
         else next.set(k, String(v));
       });
+
       setSearchParams(next, { replace: true });
     },
     [searchParams, setSearchParams]
@@ -127,7 +256,6 @@ const userId = user?.uid ?? null;
 
   const resetToTop = useCallback(
     (patch) => {
-      // reset pagination cache
       pagesRef.current = {};
       lastDocsRef.current = { 1: null };
       hasNextByPageRef.current = {};
@@ -142,35 +270,28 @@ const userId = user?.uid ?? null;
     [updateParams, scrollToTop]
   );
 
-  // ✅ iconbar -> cat + subcat (2 params)
+  const onCategoryEspecial = useCallback(()=>{
+nav(`/cate`);
+
+  },[])
   const onCategoryChange = useCallback(
-  (cat, nextSubcat) => {
-    // si quieres que "Todo" vuelva al home
-    console.log('sorry')
-    if (cat === "ALL") {
-      nav("/"); 
-      return;
-    }
+    (cat, nextSubcat) => {
+      if (cat === "ALL") {
+        nav("/");
+        return;
+      }
 
-    const qs = new URLSearchParams();
-    qs.set("cat", cat);
-    qs.set('label','')
-    qs.set("subcat", nextSubcat ?? "ALL");
-    qs.set("sort", sort);
-    qs.set("size", String(pageSize));
-    
+      const qs = new URLSearchParams();
+      qs.set("cat", cat);
+      qs.set("label", "");
+      qs.set("subcat", nextSubcat ?? "ALL");
+      qs.set("sort", sort);
+      qs.set("size", String(pageSize));
 
-    nav(`/categoria?${qs.toString()}`);
-  },
-  [nav, sort, pageSize]
-);
-
-  // const onCategoryChange = useCallback(
-  //   (cat, nextSubcat) => {
-  //     resetToTop({ cat, subcat: nextSubcat ?? "ALL" });
-  //   },
-  //   [resetToTop]
-  // );
+      nav(`/categoria?${qs.toString()}`);
+    },
+    [nav, sort, pageSize]
+  );
 
   const onSubcatChange = useCallback(
     (nextSub) => {
@@ -207,65 +328,19 @@ const userId = user?.uid ?? null;
     return SUBCATS_BY_CAT[category] ?? [];
   }, [category]);
 
-  // ✅ countdown init (solo ALL)
-  useEffect(() => {
-    if (!isAll) return;
-
-    const now = Date.now();
-    const stored = Number(sessionStorage.getItem(DISCOUNT_DEADLINE_KEY) || 0);
-    const valid = stored && stored > now;
-
-    const deadline = valid ? stored : now + MS_24H;
-    sessionStorage.setItem(DISCOUNT_DEADLINE_KEY, String(deadline));
-
-    setDiscountDeadlineMs(deadline);
-    setMsLeft(Math.max(0, deadline - now));
-  }, [isAll]);
-
-  // ✅ tick
-  useEffect(() => {
-    if (!isAll || !discountDeadlineMs) return;
-
-    const tick = () => setMsLeft(Math.max(0, discountDeadlineMs - Date.now()));
-    tick();
-
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [isAll, discountDeadlineMs]);
-
-  const refreshDiscountCycle = useCallback(() => {
-    const now = Date.now();
-    const next = now + MS_24H;
-    sessionStorage.setItem(DISCOUNT_DEADLINE_KEY, String(next));
-    setDiscountDeadlineMs(next);
-    setMsLeft(MS_24H);
-  }, []);
-
-  // si llega a 0, reinicia ciclo
-  useEffect(() => {
-    if (!isAll) return;
-    if (discountDeadlineMs && msLeft === 0) refreshDiscountCycle();
-  }, [isAll, discountDeadlineMs, msLeft, refreshDiscountCycle]);
-
-  // ✅ hard reset (cuando cambian filtros / idioma)
   useEffect(() => {
     setError("");
     setItems([]);
     setHasNext(false);
-
     setNewItems([]);
-    setDiscountItems([]);
-    setRelevantItems([]);
 
     pagesRef.current = {};
     lastDocsRef.current = { 1: null };
     hasNextByPageRef.current = {};
 
     if (page !== 1) updateParams({ p: 1 });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category, subcat, sort, pageSize, i18n.language]);
+  }, [category, subcat, sort, pageSize, i18n.language, page, updateParams]);
 
-  // ✅ ALL sections loader
   const loadAllSections = useCallback(async () => {
     if (!isAll) return;
 
@@ -273,35 +348,48 @@ const userId = user?.uid ?? null;
     setError("");
 
     try {
-     const res = await getHomeSectionsFS({ size: 6 });
-setNewItems(res.recientes ?? []);
-
+      const res = await getHomeSectionsFS({ size: 6, userId });
+      setNewItems(Array.isArray(res?.recientes) ? res.recientes : []);
     } catch (e) {
       console.error(e);
       setError(t("loadError"));
     } finally {
       setLoadingAll(false);
     }
-  }, [isAll, t]);
+  }, [isAll, t, userId]);
 
   useEffect(() => {
-    if (!isAll) return;
-    loadAllSections();
+    if (isAll) loadAllSections();
   }, [isAll, loadAllSections]);
 
-  // refresca secciones cuando cambia el ciclo del countdown
-  useEffect(() => {
+  const loadLocalGQSection = useCallback(async () => {
     if (!isAll) return;
-    if (discountDeadlineMs) loadAllSections();
-  }, [isAll, discountDeadlineMs, loadAllSections]);
 
-  // ✅ normal: pagination loader (solo cuando NO es ALL)
+    setLoadingLocalGQ(true);
+
+    try {
+      const res = await getProductsByCountry({
+        country: "Guinea Ecuatorial",
+        pageSize: 8,
+      });
+
+      setLocalGQItems(Array.isArray(res?.items) ? res.items : []);
+    } catch (e) {
+      console.error(e);
+      setLocalGQItems([]);
+    } finally {
+      setLoadingLocalGQ(false);
+    }
+  }, [isAll]);
+
+  useEffect(() => {
+    loadLocalGQSection();
+  }, [loadLocalGQSection]);
+
   const loadPage = useCallback(
     async (targetPage) => {
-      if (isAll) return;
-      if (loadingRef.current) return;
+      if (isAll || loadingRef.current) return;
 
-      // cache hit
       const cached = pagesRef.current[targetPage];
       if (Array.isArray(cached)) {
         setItems(cached);
@@ -316,8 +404,7 @@ setNewItems(res.recientes ?? []);
       setError("");
 
       try {
-        // carga incremental hasta targetPage para poder encadenar lastDoc
-        for (let p = 1; p <= targetPage; p++) {
+        for (let p = 1; p <= targetPage; p += 1) {
           if (Array.isArray(pagesRef.current[p])) continue;
 
           const lastDocForThisPage = lastDocsRef.current[p] ?? null;
@@ -351,91 +438,26 @@ setNewItems(res.recientes ?? []);
   );
 
   useEffect(() => {
-    if (isAll) return;
-    loadPage(page);
+    if (!isAll) loadPage(page);
   }, [isAll, page, loadPage]);
 
-  // ✅ map idioma (memo + callback)
-  const mapLang = useCallback(
-    (arr) => {
-      const lang = i18n.language;
-      return (arr ?? []).map((p) => ({
-        ...p,
-        title:
-          lang === "en"
-            ? p.title_en ?? p.titleEn ?? p.title ?? p.Titulo ?? ""
-            : lang === "fr"
-            ? p.title_fr ?? p.titleFr ?? p.title ?? p.Titulo ?? ""
-            : p.title_es ?? p.title ?? p.Titulo ?? "",
-        shipping:
-          lang === "en"
-            ? p.shipping_en ?? p.shippingEn ?? p.shipping ?? ""
-            : lang === "fr"
-            ? p.shipping_fr ?? p.shippingFr ?? p.shipping ?? ""
-            : p.shipping_es ?? p.shipping ?? "",
-      }));
-    },
-    [i18n.language]
+  const mappedItems = useMemo(
+    () => (items ?? []).map((p) => normalizeProduct(p, i18n.language)),
+    [items, i18n.language]
   );
 
+  const mappedNewItems = useMemo(
+    () => (newItems ?? []).map((p) => normalizeProduct(p, i18n.language)),
+    [newItems, i18n.language]
+  );
 
-
-  // ✅ Recomendados (abajo)
-  const loadRecommendations = useCallback(async () => {
-    setLoadingRec(true);
-    try {
-      // Reglas:
-      // - En ALL: recomenda "relevance" sin filtros (o ALL/ALL según tu backend)
-      // - En categoría: filtra por category/subcat actual
-      const recCategory = isAll ? "ALL" : category;
-      const recSubcat = isAll ? "ALL" : subcat;
-
-      const res = await getProductsPageFirestore({
-        pageSize: 12, // traigo más para poder filtrar duplicados
-        category: recCategory,
-        subcategory: recSubcat,
-        sort: "relevance",
-        queryText: "",
-        lastDoc: null,
-      });
-
-      let list = res?.items ?? [];
-
-      // si estás en ALL, evita duplicar items de las 3 secciones
-      if (isAll) {
-        const taken = new Set(
-          [
-            ...(relevantItems ?? []),
-          ]
-            .map((p) => p?.id ?? p?.docId ?? p?._id)
-            .filter(Boolean)
-        );
-
-        list = list.filter((p) => {
-          const pid = p?.id ?? p?.docId ?? p?._id;
-          return !pid || !taken.has(pid);
-        });
-      }
-
-      setRecommendedItems(list.slice(0, 6));
-    } catch (e) {
-      console.error(e);
-      setRecommendedItems([]);
-    } finally {
-      setLoadingRec(false);
-    }
-  }, [isAll, category, subcat, newItems, discountItems, relevantItems]);
-
-  useEffect(() => {
-    loadRecommendations();
-  }, [loadRecommendations, i18n.language, category, subcat]);
-
-  const mappedRecommendedItems = useMemo(
-    () => mapLang(recommendedItems),
-    [recommendedItems, mapLang]
+  const mappedLocalGQItems = useMemo(
+    () => (localGQItems ?? []).map((p) => normalizeProduct(p, i18n.language)),
+    [localGQItems, i18n.language]
   );
 
   const paginationCount = hasNext ? page + 1 : page;
+
   const onPageChange = useCallback(
     (_e, nextPage) => {
       if (nextPage > page && !hasNext) return;
@@ -444,38 +466,120 @@ setNewItems(res.recientes ?? []);
     [page, hasNext, updateParams]
   );
 
+  const openLocal48hSearch = useCallback(() => {
+    const qs = new URLSearchParams();
+    qs.set("country", "Guinea Ecuatorial");
+    qs.set("city", "Malabo");
+    qs.set("delivery", "48h");
+    qs.set("sort", "relevance");
+    qs.set("size", "12");
+    nav(`/search?${qs.toString()}`);
+  }, [nav]);
+
+  const openSectionSearch = useCallback(
+    (extra = {}) => {
+      const qs = new URLSearchParams();
+
+      Object.entries(extra).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== "") {
+          qs.set(key, String(value));
+        }
+      });
+
+      nav(`/search?${qs.toString()}`);
+    },
+    [nav]
+  );
+
+  const heroStats = useMemo(
+    () => [
+      { icon: <Inventory2RoundedIcon sx={{ fontSize: 18 }} />, label: "Stock local" },
+      { icon: <AccessTimeFilledRoundedIcon sx={{ fontSize: 18 }} />, label: "Entrega 48h" },
+      { icon: <PlaceRoundedIcon sx={{ fontSize: 18 }} />, label: "Malabo" },
+      { icon: <LocalShippingRoundedIcon sx={{ fontSize: 18 }} />, label: "Más rápido" },
+    ],
+    []
+  );
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
-      <Header queryText={queryText} onQueryChange={setQueryText} onSearchClick={onSearchClick} />
+      <Header
+        queryText={queryText}
+        onQueryChange={setQueryText}
+        onSearchClick={onSearchClick}
+      />
 
       <Container maxWidth="lg" sx={{ px: { xs: 1, sm: 2 }, py: { xs: 2, md: 3 } }}>
-       
+        {error ? (
+          <Alert severity="error" sx={{ mt: 1, mb: 2 }}>
+            {error}
+          </Alert>
+        ) : null}
 
-        {/* ✅ Iconos tipo burbuja */}
-<CategoryIconsBar value={category} onChange={onCategoryChange} variant="grid" />
+    
+
+        {isAll ? (
+          <Box sx={{ mb: 3 }}>
+            <SectionBlock
+              eyebrow="Entrega a domicilio en 48h  en Malabo"
+              accent="success"
+              title="Ya en Guinea Ecuatorial"
+              subtitle="Productos disponibles localmente para entrega rápida en Malabo."
+              items={mappedLocalGQItems}
+              loading={loadingLocalGQ}
+              actionLabel="Ver todos"
+              onAction={onCategoryEspecial}
+              emptyText="Aún no hay productos locales con entrega 48h disponibles."
+              rightNode={
+                <Chip
+                  icon={<LocalShippingRoundedIcon />}
+                  label="Entrega estimada: 48h"
+                  color="success"
+                  variant="filled"
+                  sx={{ fontWeight: 800 }}
+                />
+              }
+            />
+          </Box>
+        ) : null}
+         <Stack spacing={3}>
+            <SectionBlock
+              eyebrow="Compra Por Encargo"
+              accent="info"
+              title="Recién llegados"
+              subtitle="Lo último en entrar al catálogo."
+              items={mappedNewItems}
+              loading={loadingAll}
+              // actionLabel="Ver más"
+              onAction={() => openSectionSearch({ sort: "newest", size: 12 })}
+              emptyText="Todavía no hay novedades disponibles."
+            />
+          </Stack>
+
+        <CategoryIconsBar value={category} onChange={onCategoryChange} variant="grid" />
 
         <Paper
           elevation={0}
-          sx={{ mt: 1, mb: 2, borderRadius: 3, px: 1, py: 0.5, bgcolor: "background.paper" }}
+          sx={{
+            mt: 1,
+            mb: 2,
+            borderRadius: 3,
+            px: 1,
+            py: 0.5,
+            bgcolor: "background.paper",
+            border: "1px solid",
+            borderColor: "divider",
+          }}
         >
-          <SubcategoryBar category={category} items={subcatsForCat} value={subcat} onChange={onSubcatChange} />
+          <SubcategoryBar
+            category={category}
+            items={subcatsForCat}
+            value={subcat}
+            onChange={onSubcatChange}
+          />
         </Paper>
 
-        {error && (
-          <Alert severity="error" sx={{ mt: 2 }}>
-            {error}
-          </Alert>
-        )}
-          {/* ✅ Recomendados abajo también en categorías */}
-            {/* <Section
-              title="Recomendados para ti"
-              subtitle="Basado en tu categoría actual"
-              items={recommendedItems}
-              loading={loadingRec}
-            /> */}
-
-   
+       
       </Container>
     </Box>
   );

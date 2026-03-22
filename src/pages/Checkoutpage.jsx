@@ -38,11 +38,28 @@ import { useEffectiveAuth } from "../state/useEffectiveAuth";
 ========================= */
 const AIR_PRICE_PER_KG = 9000;
 const AIR_PRICE_PER_KG_BATA = 13000;
+const GE_BATA_FLAT_PRICE = 3000;
 
+/* =========================
+   HELPERS
+========================= */
 function idle(cb) {
   if (typeof window === "undefined") return;
   if ("requestIdleCallback" in window) return window.requestIdleCallback(cb, { timeout: 1200 });
   return window.setTimeout(cb, 250);
+}
+
+function cancelIdleSafe(id) {
+  if (typeof window === "undefined" || id == null) return;
+
+  if ("cancelIdleCallback" in window && typeof id !== "number") {
+    try {
+      window.cancelIdleCallback(id);
+    } catch {}
+    return;
+  }
+
+  if (typeof id === "number") clearTimeout(id);
 }
 
 function safeNumber(v, fallback = 0) {
@@ -50,36 +67,137 @@ function safeNumber(v, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function normCity(s) {
-  return String(s ?? "").trim().toLowerCase();
+function normalizeText(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
 }
 
-/**
- * ✅ Calcula envío por item basado en:
- * - ciudad (Malabo/Bata)
- * - pesoKg
- * - qty
- */
-function calcShippingForItem(item) {
-  const city = normCity(item?.Ciudad ?? item?.city ?? "malabo");
+function normalizeCity(value) {
+  const city = normalizeText(value);
+  if (city === "malabo") return "Malabo";
+  if (city === "bata") return "Bata";
+  return String(value ?? "").trim() || "Malabo";
+}
+
+function isMalaboCity(value) {
+  return normalizeText(value) === "malabo";
+}
+
+function isBataCity(value) {
+  return normalizeText(value) === "bata";
+}
+
+function isEquatorialGuineaCountry(value) {
+  const country = normalizeText(value);
+  return (
+    country === "guinea ecuatorial" ||
+    country === "equatorial guinea" ||
+    country === "guinea-equatorial"
+  );
+}
+
+function getItemCountry(item) {
+  return (
+    item?.country ??
+    item?.Country ??
+    item?.Pais ??
+    item?.pais ??
+    item?.PaisOrigen ??
+    item?.paisOrigen ??
+    item?.PaisDestino ??
+    item?.paisDestino ??
+    ""
+  );
+}
+
+function getItemWeightKg(item) {
+  const candidates = [
+    item?.PesoKg,
+    item?.pesoKg,
+    item?.weightKg,
+    item?.WeightKg,
+    item?.kg,
+    item?.KG,
+    item?.peso_real,
+    item?.pesoReal,
+    item?.PesoReal,
+    item?.Peso,
+    item?.peso,
+  ];
+
+  for (const candidate of candidates) {
+    const n = Number(candidate);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+
+  return 0;
+}
+
+function hasGuineaEcuatorialRule(item) {
+  if (item?.shippingRule === "GE_SPECIAL") return true;
+  if (item?.isEquatorialGuinea === true) return true;
+  return isEquatorialGuineaCountry(getItemCountry(item));
+}
+
+function resolveShippingForItem(item) {
+  const city = normalizeCity(item?.Ciudad ?? item?.city ?? "Malabo");
   const qty = Math.max(1, safeNumber(item?.qty ?? 1, 1));
 
-  // peso numérico: preferimos PesoKg; fallback Peso
-  const pesoKg =
-    safeNumber(item?.PesoKg, NaN);
-  const pesoAlt =
-    safeNumber(item?.Peso, NaN);
+  // ✅ PRIORIDAD ABSOLUTA: regla especial Guinea Ecuatorial
+  if (hasGuineaEcuatorialRule(item)) {
+    if (isMalaboCity(city)) {
+      return {
+        city: "Malabo",
+        country: "Guinea Ecuatorial",
+        isSpecialRule: true,
+        shipping: 0,
+        shippingLabel: "Guinea Ecuatorial - Malabo",
+        shippingMessage: "Envío gratis para Guinea Ecuatorial con destino Malabo.",
+      };
+    }
 
-  const weight = Number.isFinite(pesoKg) ? pesoKg : (Number.isFinite(pesoAlt) ? pesoAlt : 0);
+    if (isBataCity(city)) {
+      return {
+        city: "Bata",
+        country: "Guinea Ecuatorial",
+        isSpecialRule: true,
+        shipping: GE_BATA_FLAT_PRICE,
+        shippingLabel: "Guinea Ecuatorial - Bata",
+        shippingMessage: "Envío fijo de 3000 XFA para Guinea Ecuatorial con destino Bata.",
+      };
+    }
 
-  const rate = city === "bata" ? AIR_PRICE_PER_KG_BATA : AIR_PRICE_PER_KG;
+    return {
+      city,
+      country: "Guinea Ecuatorial",
+      isSpecialRule: true,
+      shipping: 0,
+      shippingLabel: "Guinea Ecuatorial",
+      shippingMessage: "Regla especial de Guinea Ecuatorial aplicada.",
+    };
+  }
 
-  return Math.round(weight * rate * qty);
+  // ✅ Regla estándar para otros países
+  const weightKg = getItemWeightKg(item);
+  const rate = isBataCity(city) ? AIR_PRICE_PER_KG_BATA : AIR_PRICE_PER_KG;
+  const shipping = Math.round(weightKg * rate * qty);
+
+  return {
+    city,
+    country: getItemCountry(item),
+    isSpecialRule: false,
+    shipping,
+    shippingLabel: `Aéreo ${city}`,
+    shippingMessage: "Costo calculado por peso y ciudad.",
+    weightKg,
+    rate,
+  };
 }
 
-/**
- * ✅ Precalcula totales + añade shipping calculado al item (sin mutar el original).
- */
 function buildItemsWithShipping(items) {
   const out = [];
   let productsSubtotal = 0;
@@ -88,9 +206,10 @@ function buildItemsWithShipping(items) {
   for (let i = 0; i < (items?.length ?? 0); i++) {
     const it = items[i];
     const qty = Math.max(1, safeNumber(it?.qty ?? 1, 1));
-    const price = safeNumber(it?.Precio ?? 0, 0);
+    const price = safeNumber(it?.Precio ?? it?.price ?? 0, 0);
 
-    const shipping = calcShippingForItem(it);
+    const shippingMeta = resolveShippingForItem(it);
+    const shipping = safeNumber(shippingMeta?.shipping, 0);
 
     productsSubtotal += price * qty;
     shippingTotal += shipping;
@@ -98,7 +217,8 @@ function buildItemsWithShipping(items) {
     out.push({
       ...it,
       _qty: qty,
-      _shipping: shipping, // ✅ envío calculado (XFA)
+      _shipping: shipping,
+      _shippingMeta: shippingMeta,
     });
   }
 
@@ -123,7 +243,12 @@ const Header = lazy(() => import("../components/header"));
 /* =========================
    MOBILE BAR
 ========================= */
-const MobileFixedPayBar = memo(function MobileFixedPayBar({ visible, total, onPay, disabled }) {
+const MobileFixedPayBar = memo(function MobileFixedPayBar({
+  visible,
+  total,
+  onPay,
+  disabled,
+}) {
   if (!visible) return null;
 
   return (
@@ -173,6 +298,7 @@ const CheckoutItem = memo(function CheckoutItem({ item, showRemove, onRemove }) 
   const title = item?.titulo ?? item?.Titulo ?? "Producto";
   const qty = item?._qty ?? item?.qty ?? 1;
   const shipping = item?._shipping ?? 0;
+  const shippingMessage = item?._shippingMeta?.shippingMessage ?? "";
 
   return (
     <Paper sx={{ p: 2, mb: 1.25, borderRadius: 2 }}>
@@ -206,6 +332,12 @@ const CheckoutItem = memo(function CheckoutItem({ item, showRemove, onRemove }) 
               {item.Detalles}
             </Typography>
           ) : null}
+
+          {shippingMessage ? (
+            <Typography sx={{ mt: 0.5, color: "text.secondary" }} variant="body2">
+              {shippingMessage}
+            </Typography>
+          ) : null}
         </Box>
 
         {showRemove ? (
@@ -227,21 +359,12 @@ export default function CheckoutPage() {
   const theme = useTheme();
   const isDesktop = useMediaQuery(theme.breakpoints.up("md"));
 
-  // preload header SOLO desktop
   useEffect(() => {
     if (!isDesktop) return;
     const id = idle(() => import("../components/header"));
-    return () => {
-      if (typeof window === "undefined") return;
-      if ("cancelIdleCallback" in window && typeof id === "number") {
-        try {
-          window.cancelIdleCallback(id);
-        } catch {}
-      } else if (typeof id === "number") clearTimeout(id);
-    };
+    return () => cancelIdleSafe(id);
   }, [isDesktop]);
 
-  // flujo web normal
   const buyNowItem = location.state?.buyNowItem ?? null;
   const selectedIdsArr = location.state?.selectedIds ?? [];
   const isBuyNow = Boolean(buyNowItem);
@@ -250,7 +373,6 @@ export default function CheckoutPage() {
     return selectedIdsArr.length ? new Set(selectedIdsArr) : null;
   }, [selectedIdsArr]);
 
-  // flujo webview
   const webviewItems = useMemo(() => {
     if (location.state) return null;
     return getCheckoutFromCache();
@@ -263,7 +385,6 @@ export default function CheckoutPage() {
     return [];
   }, [buyNowItem, selectedIds, cart.items, webviewItems]);
 
-  // ✅ Optimización clave: anexamos shipping calculado una sola vez
   const computed = useMemo(() => buildItemsWithShipping(rawItemsToPay), [rawItemsToPay]);
   const itemsToPay = computed.items;
 
@@ -277,7 +398,6 @@ export default function CheckoutPage() {
     };
   }, []);
 
-  // checkCompras en idle
   useEffect(() => {
     const uid = auth.user?.uid;
     if (!uid) return;
@@ -297,15 +417,9 @@ export default function CheckoutPage() {
     };
 
     const id = idle(run);
-
     return () => {
       cancelled = true;
-      if (typeof window === "undefined") return;
-      if ("cancelIdleCallback" in window && typeof id === "number") {
-        try {
-          window.cancelIdleCallback(id);
-        } catch {}
-      } else if (typeof id === "number") clearTimeout(id);
+      cancelIdleSafe(id);
     };
   }, [auth.user?.uid]);
 
@@ -326,7 +440,6 @@ export default function CheckoutPage() {
     };
   }, [computed.productsSubtotal, computed.shippingTotal, discountRate]);
 
-  // Datos comprador
   const [nombre, setNombre] = useState("");
   const [telefono, setTelefono] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -347,12 +460,14 @@ export default function CheckoutPage() {
       nav("/login");
       return;
     }
+
     if (!hasItems) return;
 
     if (!nombreOk) {
       setErrReserve("Escribe tu nombre y apellidos.");
       return;
     }
+
     if (!telefonoOk) {
       setErrReserve("Escribe tu teléfono / WhatsApp.");
       return;
@@ -363,17 +478,20 @@ export default function CheckoutPage() {
 
       const compraId = getCurrentTimestamp();
 
-      // ✅ guardamos los items con shipping calculado para que quede trazable
       const compraData = itemsToPay.map((it) => ({
         ...it,
-        Envio: it._shipping, // si tu backend espera Envio
+        Envio: it._shipping,
+        EnvioMeta: it._shippingMeta,
       }));
 
       await createReservaDualFS({
         userId: auth.user.uid,
         compraId,
         compraData,
-        userInfo: { nombre: nombre.trim(), contacto: String(telefono).trim() },
+        userInfo: {
+          nombre: nombre.trim(),
+          contacto: String(telefono).trim(),
+        },
         descuento: totals.discountAmount,
         total: totals.finalTotal,
         envio: totals.shippingTotal,
@@ -461,7 +579,8 @@ export default function CheckoutPage() {
                   {errReserve ? <Alert severity="error">{errReserve}</Alert> : null}
 
                   <Alert severity="info">
-                    Tu pedido se reserva por <b>48 horas</b>. Se procesa cuando confirmamos el pago en oficina o banco.
+                    Tu pedido se reserva por <b>48 horas</b>. Se procesa cuando confirmamos el pago
+                    en oficina o banco.
                   </Alert>
                 </Stack>
               </Paper>
@@ -516,7 +635,7 @@ export default function CheckoutPage() {
                   ) : null}
 
                   <Typography variant="body2" sx={{ mt: 0.5, color: "text.secondary" }}>
-Confirmamos el costo final con usted antes del despacho para mas transparencia.                    
+                    Confirmamos el costo final con usted antes del despacho para más transparencia.
                   </Typography>
                 </Stack>
               </Paper>
