@@ -1,0 +1,28 @@
+# Dependencias
+node_modules
+
+# Build
+dist
+dist-ssr
+
+# Entorno / secretos (NUNCA subir)
+.env
+.env.*
+!.env.example
+
+# Claves privadas (NUNCA subir)
+chekeaweb
+*.pem
+id_rsa*
+*.key
+
+# Sistema / editores
+.DS_Store
+*.local
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# Logs Firebase
+firebase-debug.log
+firebase-debug.*.log

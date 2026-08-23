@@ -1,0 +1,76 @@
+/* -----------------------------------------------------------------------------
+   Base + capa de "sensación de app nativa" dentro del WebView.
+   Objetivo: que dentro de la app (iOS/Android WebView) no se note que es web.
+   Todo es seguro: la selección de texto se mantiene en inputs y formularios.
+   ----------------------------------------------------------------------------- */
+
+:root {
+  color-scheme: light;
+  /* Atajos para respetar el notch / barras del sistema (safe areas). */
+  --safe-top: env(safe-area-inset-top);
+  --safe-bottom: env(safe-area-inset-bottom);
+  --safe-left: env(safe-area-inset-left);
+  --safe-right: env(safe-area-inset-right);
+}
+
+html {
+  /* Sin rebote elástico ni "pull-to-refresh" accidental dentro del WebView. */
+  overscroll-behavior: none;
+  /* Evita el zoom por doble toque, pero deja el scroll y el pellizco normales. */
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  /* Altura estable con la barra dinámica del navegador móvil. */
+  min-height: 100dvh;
+  overscroll-behavior-y: none;
+  /* Texto más nítido, como en apps nativas. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Sin flash azul al tocar y sin menú de "mantener pulsado". */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  /* Por defecto no se selecciona texto (como una app); se reactiva abajo. */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Scroll con inercia (momentum) en iOS. */
+* {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* La selección SÍ funciona donde de verdad hace falta: formularios y texto
+   marcado como seleccionable con la clase .selectable. */
+input,
+textarea,
+select,
+[contenteditable="true"],
+.selectable,
+.selectable * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* En iOS, tipografía < 16px hace que el WebView haga zoom al enfocar un input.
+   Forzamos 16px mínimo para que nunca "salte" la pantalla al escribir. */
+@supports (-webkit-touch-callout: none) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+/* Imágenes que no se puedan arrastrar (comportamiento de app). */
+img {
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+
+/* Utilidades opcionales de safe-area por si las quieres usar en tu layout. */
+.safe-top { padding-top: var(--safe-top); }
+.safe-bottom { padding-bottom: var(--safe-bottom); }

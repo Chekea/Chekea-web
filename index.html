@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/chekealogo.png" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"
+    />
+    <meta name="theme-color" content="#0A0A0A" />
+    <meta name="description" content="Chekea — el mercado más grande de Guinea Ecuatorial." />
+    <!-- Sensación de app dentro del WebView / al añadir a pantalla de inicio -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Chekea — El Mercado más grande de Guinea Ecuatorial</title>
+    <style>
+      /* Pantalla de carga en HTML puro: aparece antes que el JavaScript y se
+         reemplaza sola cuando React monta. */
+      #boot {
+        position: fixed; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 16px;
+        background: #0A0A0A; color: #fff;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        padding: env(safe-area-inset-top) env(safe-area-inset-right)
+                 env(safe-area-inset-bottom) env(safe-area-inset-left);
+      }
+      #boot img { width: 76px; height: 76px; object-fit: contain; border-radius: 18px; }
+      #boot .s {
+        width: 26px; height: 26px; border: 3px solid rgba(255,255,255,.25);
+        border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) { #boot .s { animation: none; } }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div id="boot">
+        <img src="/chekealogo.png" alt="Chekea" onerror="this.style.display='none'" />
+        <div class="s"></div>
+      </div>
+    </div>
+
+    <!-- Autodiagnóstico: script CLÁSICO (se ejecuta aunque los módulos ES no
+         carguen). Si la app no monta, muestra el motivo dentro de #boot en vez
+         de dejar una pantalla de carga muda. -->
+    <script>
+      (function () {
+        function showMsg(html) {
+          var b = document.getElementById('boot');
+          if (!b) return;
+          var s = b.querySelector('.s'); if (s) s.style.display = 'none';
+          var box = document.getElementById('boot-msg');
+          if (!box) {
+            box = document.createElement('div');
+            box.id = 'boot-msg';
+            box.style.cssText = 'max-width:320px;text-align:center;font-size:13px;' +
+              'line-height:1.55;opacity:.95;padding:0 22px';
+            b.appendChild(box);
+          }
+          box.innerHTML = html;
+        }
+        if (location.protocol === 'file:') {
+          showMsg('Has abierto el archivo directamente. Esta app necesita un ' +
+            'servidor.<br><br>En una terminal, dentro de la carpeta del proyecto:' +
+            '<br><b>npm&nbsp;install</b><br><b>npm&nbsp;run&nbsp;dev</b><br><br>' +
+            'y abre la dirección que aparezca (p.&nbsp;ej. http://localhost:5173).');
+          return;
+        }
+        function onErr(msg) {
+          if (window.__CHEKEA_MOUNTED__) return;
+          showMsg('No se pudo iniciar la app.<br><br><small style="opacity:.85">' +
+            String(msg || '').slice(0, 300) + '</small><br><br>' +
+            'Abre la consola para ver el detalle.');
+        }
+        window.addEventListener('error', function (e) { onErr(e.message || e.error); });
+        window.addEventListener('unhandledrejection', function (e) {
+          onErr((e.reason && e.reason.message) || e.reason);
+        });
+        setTimeout(function () {
+          if (!window.__CHEKEA_MOUNTED__ && document.getElementById('boot')) {
+            showMsg('Esto tarda más de lo normal. Revisa tu conexión.<br><br>' +
+              'Para desarrollo, arranca con <b>npm&nbsp;run&nbsp;dev</b>.');
+          }
+        }, 10000);
+      })();
+    </script>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
