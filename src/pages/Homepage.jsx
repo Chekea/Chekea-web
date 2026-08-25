@@ -49,7 +49,7 @@ import { useTranslation } from "react-i18next";
 import { useEffectiveAuth } from "../state/useEffectiveAuth";
 import { openProductWhatsApp, openChekeaWhatsApp } from "../config/chekea";
 import { imagenDe } from "../domain/product";
-import { readCache, writeCache } from "../services/feedCache";
+import { readCache, writeCache, FRESH_MS, DAY_MS } from "../services/feedCache";
 
 
 
@@ -661,12 +661,12 @@ export default function HomePage() {
   const recientesKey = `home:recientes:${userId ?? "anon"}`;
   const gqKey = "home:gq";
 
-  // Inicializamos el estado DESDE la caché en memoria. Si el usuario ya estuvo
-  // en la portada, los productos aparecen al instante y no se re-descargan.
-  const [newItems, setNewItems] = useState(() => readCache(recientesKey) || []);
-  const [localGQItems, setLocalGQItems] = useState(() => readCache(gqKey) || []);
-  const [loadingAll, setLoadingAll] = useState(() => (readCache(recientesKey) ? false : true));
-  const [loadingLocalGQ, setLoadingLocalGQ] = useState(() => (readCache(gqKey) ? false : true));
+  // Estado inicial DESDE disco (hasta 24 h): al reabrir la app, los productos
+  // aparecen al instante sin esperar a la red. Luego se refrescan por detrás.
+  const [newItems, setNewItems] = useState(() => readCache(recientesKey, DAY_MS) || []);
+  const [localGQItems, setLocalGQItems] = useState(() => readCache(gqKey, DAY_MS) || []);
+  const [loadingAll, setLoadingAll] = useState(() => (readCache(recientesKey, DAY_MS) ? false : true));
+  const [loadingLocalGQ, setLoadingLocalGQ] = useState(() => (readCache(gqKey, DAY_MS) ? false : true));
   const [error, setError] = useState("");
   // Cambia en cada apertura de la portada -> muestra destacados distintos.
   // Tócalo con setShuffleKey(Date.now()) si quieres un botón "barajar".
@@ -685,16 +685,16 @@ export default function HomePage() {
 
   const loadAllSections = useCallback(
     async ({ force = false } = {}) => {
-      // Si hay caché fresca y no forzamos, la usamos y NO tocamos la red.
-      if (!force) {
-        const cached = readCache(recientesKey);
-        if (cached) {
-          setNewItems(cached);
-          setLoadingAll(false);
-          return;
-        }
+      // 1) Muestra al instante lo guardado (aunque sea de hace horas).
+      const cached = readCache(recientesKey, DAY_MS);
+      if (cached) {
+        setNewItems(cached);
+        setLoadingAll(false);
       }
-      setLoadingAll(true);
+      // 2) Si es reciente (< 5 min) y no forzamos, no gastamos red.
+      if (!force && readCache(recientesKey, FRESH_MS)) return;
+      // 3) Refresca por detrás (spinner solo si no había nada que mostrar).
+      if (!cached) setLoadingAll(true);
       setError("");
       try {
         const { getHomeSectionsFS } = await import("../services/product.firesore.service");
@@ -705,7 +705,7 @@ export default function HomePage() {
         writeCache(recientesKey, data);
       } catch (e) {
         console.error(e);
-        setError(t("loadError") || "No se pudieron cargar los productos.");
+        if (!cached) setError(t("loadError") || "No se pudieron cargar los productos.");
       } finally {
         setLoadingAll(false);
       }
@@ -715,15 +715,13 @@ export default function HomePage() {
 
   const loadLocalGQSection = useCallback(
     async ({ force = false } = {}) => {
-      if (!force) {
-        const cached = readCache(gqKey);
-        if (cached) {
-          setLocalGQItems(cached);
-          setLoadingLocalGQ(false);
-          return;
-        }
+      const cached = readCache(gqKey, DAY_MS);
+      if (cached) {
+        setLocalGQItems(cached);
+        setLoadingLocalGQ(false);
       }
-      setLoadingLocalGQ(true);
+      if (!force && readCache(gqKey, FRESH_MS)) return;
+      if (!cached) setLoadingLocalGQ(true);
       try {
         const { getProductsByCountry } = await import("../services/product.firesore.service");
         const res = await getProductsByCountry({
@@ -735,12 +733,12 @@ export default function HomePage() {
         writeCache(gqKey, data);
       } catch (e) {
         console.error(e);
-        setLocalGQItems([]);
+        if (!cached) setLocalGQItems([]);
       } finally {
         setLoadingLocalGQ(false);
       }
     },
-    []
+    [gqKey]
   );
 
   useEffect(() => {
