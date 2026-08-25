@@ -5,12 +5,18 @@ import {
   Stepper, Step, StepButton, Stack, Chip, MenuItem,
   Divider, Avatar, CircularProgress, Alert, IconButton
 } from "@mui/material";
-
-import {
-  Inventory2Outlined, AddCircleOutline, ArrowForward, ArrowBack,
-  CheckCircleOutline, CloudUploadOutlined, Close, EditOutlined,
-  DeleteOutline, WarningAmberOutlined
-} from "@mui/icons-material";
+import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
+import { useNavigate } from "react-router-dom";
+import Inventory2Outlined from "@mui/icons-material/Inventory2Outlined";
+import AddCircleOutline from "@mui/icons-material/AddCircleOutline";
+import ArrowForward from "@mui/icons-material/ArrowForward";
+import ArrowBack from "@mui/icons-material/ArrowBack";
+import CheckCircleOutline from "@mui/icons-material/CheckCircleOutline";
+import CloudUploadOutlined from "@mui/icons-material/CloudUploadOutlined";
+import Close from "@mui/icons-material/Close";
+import EditOutlined from "@mui/icons-material/EditOutlined";
+import DeleteOutline from "@mui/icons-material/DeleteOutline";
+import WarningAmberOutlined from "@mui/icons-material/WarningAmberOutlined";
 
 import { db, storage } from "../config/firebase";
 import { collection, doc, setDoc, serverTimestamp } from "firebase/firestore";
@@ -178,6 +184,7 @@ export default function CrearLoteChekea({ vendedorId }) {
   // en cada producto para que el comprador le escriba a ÉL (no a Chekea).
   const auth = useEffectiveAuth();
   const sellerUid = vendedorId ?? auth?.user?.uid ?? null;
+    const nav = useNavigate();
 
   const [activeStep, setActiveStep] = useState(0);
   const [shipment, setShipment] = useState({ nombre: "", whatsapp: "", ciudad: "Malabo", cajas: [] });
@@ -485,9 +492,28 @@ export default function CrearLoteChekea({ vendedorId }) {
 
   return (
     <Box sx={{ minHeight: "100vh", background: "#F6F7F9", p: 2 }}>
+      <Box
+        sx={{
+          position: "sticky",
+          top: 0,
+          zIndex: 10,
+          bgcolor: "#FFFFFF",
+          borderBottom: "1px solid #EEF0F6",
+          px: 1,
+          py: 1,
+          pt: "calc(env(safe-area-inset-top) + 8px)",
+          display: "flex",
+          alignItems: "center",
+          gap: 1,
+        }}
+      >
+        <IconButton onClick={() => nav(-1)} aria-label="Volver">
+          <ArrowBackRoundedIcon />
+        </IconButton>
+        <Typography sx={{ fontWeight: 900, fontSize: 18 }}>Reservar Espacio</Typography>
+      </Box>
       <Box maxWidth={480} mx="auto">
         <Stack direction="row" alignItems="center" justifyContent="space-between">
-          <Typography variant="caption" color="text.secondary">CHEKEA</Typography>
           {(shipment.nombre || shipment.cajas.length > 0) && !enviado && (
             <Chip size="small" label="Borrador guardado" variant="outlined" />
           )}

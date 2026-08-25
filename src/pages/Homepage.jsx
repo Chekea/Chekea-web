@@ -39,14 +39,13 @@ import WeekendRoundedIcon from "@mui/icons-material/WeekendRounded";
 import SpaRoundedIcon from "@mui/icons-material/SpaRounded";
 import SportsEsportsRoundedIcon from "@mui/icons-material/SportsEsportsRounded";
 import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
-
-import { useTranslation } from "react-i18next";
+import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
 import { useNavigate } from "react-router-dom";
 
-import {
-  getHomeSectionsFS,
-  getProductsByCountry,
-} from "../services/product.firesore.service";
+import { useTranslation } from "react-i18next";
+
+// El servicio de datos (y con él Firebase) se carga de forma DIFERIDA dentro de
+// las funciones de carga, para que la portada se pinte antes de traer los datos.
 import { useEffectiveAuth } from "../state/useEffectiveAuth";
 import { openProductWhatsApp, openChekeaWhatsApp } from "../config/chekea";
 import { imagenDe } from "../domain/product";
@@ -61,6 +60,17 @@ const POPULAR_CATEGORIES = [
   { label: "Belleza", icon: SpaRoundedIcon, route: "/categoria?cat=Belleza%20%26%20Accesorios" },
   { label: "Deportes", icon: SportsEsportsRoundedIcon, route: "/categoria?cat=Deportes" },
 ];
+
+// Baraja una copia del array (Fisher-Yates) y devuelve como máximo n elementos.
+// Se usa para mostrar destacados aleatorios sin descargar todo el catálogo.
+function pickRandom(arr, n) {
+  const a = Array.isArray(arr) ? [...arr] : [];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a.slice(0, n);
+}
 
 function normalizeProduct(p, lang) {
   return {
@@ -130,7 +140,7 @@ function TopFeedHeader({ onSearch }) {
           </Typography>
           <KeyboardArrowDownRoundedIcon sx={{ color: "#5F6273" }} />
         </Paper>
-
+{/* 
         <IconButton
           aria-label="Buscar"
           onClick={onSearch}
@@ -145,7 +155,7 @@ function TopFeedHeader({ onSearch }) {
           }}
         >
           <SearchRoundedIcon sx={{ color: "#11152C" }} />
-        </IconButton>
+        </IconButton> */}
       </Stack>
     </Box>
   );
@@ -427,7 +437,7 @@ function LogisticsBanner({ onNavigate }) {
   );
 }
 
-function SectionTitle({ title, action = "Ver todas", onAction }) {
+function SectionTitle({ title, action = "Ver todas", onAction, onShuffle }) {
   return (
     <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mt: 3, mb: 1.4 }}>
       <Typography
@@ -441,22 +451,35 @@ function SectionTitle({ title, action = "Ver todas", onAction }) {
         {title}
       </Typography>
 
-      {action ? (
-        <Button
-          onClick={onAction}
-          endIcon={<ArrowForwardRoundedIcon sx={{ fontSize: 16 }} />}
-          sx={{
-            minWidth: "auto",
-            px: 0.5,
-            color: "#2845CC",
-            fontWeight: 850,
-            textTransform: "none",
-            fontSize: 14,
-          }}
-        >
-          {action}
-        </Button>
-      ) : null}
+      <Stack direction="row" alignItems="center" spacing={0.5}>
+        {onShuffle ? (
+          <IconButton
+            onClick={onShuffle}
+            aria-label="Barajar"
+            size="small"
+            sx={{ color: "#2845CC" }}
+          >
+            <RefreshRoundedIcon sx={{ fontSize: 20 }} />
+          </IconButton>
+        ) : null}
+
+        {action ? (
+          <Button
+            onClick={onAction}
+            endIcon={<ArrowForwardRoundedIcon sx={{ fontSize: 16 }} />}
+            sx={{
+              minWidth: "auto",
+              px: 0.5,
+              color: "#2845CC",
+              fontWeight: 850,
+              textTransform: "none",
+              fontSize: 14,
+            }}
+          >
+            {action}
+          </Button>
+        ) : null}
+      </Stack>
     </Stack>
   );
 }
@@ -572,12 +595,12 @@ function ProductCard({ product, onOpen }) {
   );
 }
 
-function ProductsPreview({ title, items, loading, onViewAll, onOpenProduct }) {
+function ProductsPreview({ title, items, loading, onViewAll, onOpenProduct, onShuffle }) {
   const visibleItems = items.slice(0, 6);
 
   return (
     <Box>
-      <SectionTitle title={title} onAction={onViewAll} />
+      <SectionTitle title={title} onAction={onViewAll} onShuffle={onShuffle} />
 
       {loading ? (
         <Box sx={{ minHeight: 210, display: "grid", placeItems: "center" }}>
@@ -645,6 +668,9 @@ export default function HomePage() {
   const [loadingAll, setLoadingAll] = useState(() => (readCache(recientesKey) ? false : true));
   const [loadingLocalGQ, setLoadingLocalGQ] = useState(() => (readCache(gqKey) ? false : true));
   const [error, setError] = useState("");
+  // Cambia en cada apertura de la portada -> muestra destacados distintos.
+  // Tócalo con setShuffleKey(Date.now()) si quieres un botón "barajar".
+  const [shuffleKey, setShuffleKey] = useState(() => Date.now());
 
   const go = useCallback(
     (route) => {
@@ -671,7 +697,9 @@ export default function HomePage() {
       setLoadingAll(true);
       setError("");
       try {
-        const res = await getHomeSectionsFS({ size: 6, userId });
+        const { getHomeSectionsFS } = await import("../services/product.firesore.service");
+        // Traemos un grupo más amplio (no todo) para poder mostrar una muestra al azar.
+        const res = await getHomeSectionsFS({ size: 18, userId });
         const data = Array.isArray(res?.recientes) ? res.recientes : [];
         setNewItems(data);
         writeCache(recientesKey, data);
@@ -697,9 +725,10 @@ export default function HomePage() {
       }
       setLoadingLocalGQ(true);
       try {
+        const { getProductsByCountry } = await import("../services/product.firesore.service");
         const res = await getProductsByCountry({
           country: "Guinea Ecuatorial",
-          pageSize: 8,
+          pageSize: 18,
         });
         const data = Array.isArray(res?.items) ? res.items : [];
         setLocalGQItems(data);
@@ -729,7 +758,14 @@ export default function HomePage() {
     [localGQItems, i18n.language]
   );
 
-  const featuredItems = mappedLocalGQItems.length ? mappedLocalGQItems : mappedNewItems;
+  // Grupo del que salen los destacados (locales de Guinea o, si no hay, recientes).
+  const featuredPool = mappedLocalGQItems.length ? mappedLocalGQItems : mappedNewItems;
+  // Muestra ALEATORIA de 6. Se recalcula al abrir la portada (shuffleKey) o al
+  // llegar nuevos datos, pero NO en cada re-render (así no "salta" sola).
+  const featuredItems = useMemo(
+    () => pickRandom(featuredPool, 6),
+    [featuredPool, shuffleKey]
+  );
   const featuredLoading = mappedLocalGQItems.length ? loadingLocalGQ : loadingLocalGQ || loadingAll;
 
   const openProduct = useCallback((product) => {
@@ -771,6 +807,7 @@ export default function HomePage() {
           loading={featuredLoading}
           onViewAll={() => go("/cate")}
           onOpenProduct={openProduct}
+          onShuffle={() => setShuffleKey(Date.now())}
         />
 
        

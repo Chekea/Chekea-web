@@ -499,12 +499,26 @@ export default function CategoryPage() {
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
-      {/* Header solo desktop */}
-      {isDesktop ? (
-        <Suspense fallback={null}>
-          <Header queryText={queryText} onQueryChange={setQueryText} />
-        </Suspense>
-      ) : null}
+      <Box
+        sx={{
+          position: "sticky",
+          top: 0,
+          zIndex: 10,
+          bgcolor: "#FFFFFF",
+          borderBottom: "1px solid #EEF0F6",
+          px: 1,
+          py: 1,
+          pt: "calc(env(safe-area-inset-top) + 8px)",
+          display: "flex",
+          alignItems: "center",
+          gap: 1,
+        }}
+      >
+        <IconButton onClick={() => nav(-1)} aria-label="Volver">
+          <ArrowBackRoundedIcon />
+        </IconButton>
+        <Typography sx={{ fontWeight: 900, fontSize: 18 }}>Enviar un paquete</Typography>
+      </Box>
 
       <Container maxWidth="lg" sx={{ px: { xs: 1, sm: 2 }, py: 3 }}>
         <DesktopCategoryHero

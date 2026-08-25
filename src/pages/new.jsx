@@ -25,8 +25,10 @@ import Typography from "@mui/material/Typography";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import { useTheme } from "@mui/material/styles";
 import { useTranslation } from "react-i18next";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { getProductsPageEG } from "../services/product.firesore.service";
+import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
+import { IconButton } from "@mui/material";
 
 const ProductGrid = lazy(() => import("../components/productgrid"));
 const Header = lazy(() => import("../components/header"));
@@ -172,6 +174,8 @@ async function fetchCategoryPage({ category, pageSize, lastDoc }) {
 }
 
 export default function CategoryPageEg() {
+    const nav = useNavigate();
+  
   const { t, i18n } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -409,11 +413,26 @@ export default function CategoryPageEg() {
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
-      {isDesktop ? (
-        <Suspense fallback={null}>
-          <Header queryText={queryText} onQueryChange={setQueryText} />
-        </Suspense>
-      ) : null}
+       <Box
+        sx={{
+          position: "sticky",
+          top: 0,
+          zIndex: 10,
+          bgcolor: "#FFFFFF",
+          borderBottom: "1px solid #EEF0F6",
+          px: 1,
+          py: 1,
+          pt: "calc(env(safe-area-inset-top) + 8px)",
+          display: "flex",
+          alignItems: "center",
+          gap: 1,
+        }}
+      >
+        <IconButton onClick={() => nav(-1)} aria-label="Volver">
+          <ArrowBackRoundedIcon />
+        </IconButton>
+        <Typography sx={{ fontWeight: 900, fontSize: 18 }}>Productos</Typography>
+      </Box>
 
       <Backdrop
         open={switchingCategory}

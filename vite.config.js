@@ -6,21 +6,37 @@ export default defineConfig({
   plugins: [react()],
 
   build: {
-    // Compatibilidad con WebViews de dispositivos de gama media/baja.
-    target: "es2019",
-    // Menos peso en producción.
+    // WebViews modernos (Expo 57 / iOS/Android actuales): menos transpilación = paquete más ligero.
+    target: "es2020",
     sourcemap: false,
-    // Avisa si algún chunk se pasa de tamaño (útil para vigilar el peso en red mala).
+    cssCodeSplit: true,
+    reportCompressedSize: false,
     chunkSizeWarningLimit: 900,
+
+    rollupOptions: {
+      output: {
+        // Separar las librerías grandes en bloques propios. Beneficios:
+        //  - Se descargan EN PARALELO (más rápido en el primer arranque).
+        //  - Se cachean aparte: al actualizar tu código, el usuario NO vuelve a
+        //    descargar React/MUI/Firebase (aperturas siguientes casi instantáneas).
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (id.includes("firebase") || id.includes("@firebase")) return "firebase";
+          if (id.includes("@mui") || id.includes("@emotion")) return "mui";
+          if (id.includes("react-router")) return "router";
+          if (
+            id.includes("/react/") ||
+            id.includes("/react-dom/") ||
+            id.includes("scheduler")
+          )
+            return "react";
+          if (id.includes("i18next") || id.includes("react-i18next")) return "i18n";
+          return "vendor";
+        },
+      },
+    },
   },
 
-  server: {
-    // Permite abrir la app desde un teléfono en la misma red Wi-Fi
-    // (aparece una URL "Network" al ejecutar npm run dev).
-    host: true,
-  },
-
-  preview: {
-    host: true,
-  },
+  server: { host: true },
+  preview: { host: true },
 });
