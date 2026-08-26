@@ -49,6 +49,7 @@ import { useTranslation } from "react-i18next";
 import { useEffectiveAuth } from "../state/useEffectiveAuth";
 import { openProductWhatsApp, openChekeaWhatsApp } from "../config/chekea";
 import { imagenDe } from "../domain/product";
+import { pickCoverUrl } from "../utils/media";
 import { readCache, writeCache, FRESH_MS, DAY_MS } from "../services/feedCache";
 
 
@@ -72,6 +73,17 @@ function pickRandom(arr, n) {
   return a.slice(0, n);
 }
 
+// Imagen para las tarjetas de la portada: usa la MINIATURA (más ligera) si el
+// producto tiene variantes; si no (productos antiguos), cae a la imagen normal.
+function thumbDe(p) {
+  const v = p?.media?.cover?.variants || {};
+  const u = p?.media?.cover?.urls || {};
+  if (v.thumb || u.thumb || v.card || u.card) {
+    return pickCoverUrl(p, { prefer: "thumb" });
+  }
+  return imagenDe(p);
+}
+
 function normalizeProduct(p, lang) {
   return {
     ...p,
@@ -92,7 +104,7 @@ function normalizeProduct(p, lang) {
         : lang === "fr"
           ? p.shipping_fr ?? p.shippingFr ?? p.shipping ?? "Haute qualité"
           : p.shipping_es ?? p.shipping ?? "Alta calidad",
-    image: imagenDe(p),
+    image: thumbDe(p),
     price: p.price ?? p.precio ?? p.Precio ?? p.priceValue ?? 0,
     country: p.country ?? p.Pais ?? "",
   };
@@ -387,6 +399,13 @@ function LogisticsBanner({ onNavigate }) {
       route: "/mudanza",
       grad: "linear-gradient(135deg,#C36B14 0%,#F28A14 100%)",
     },
+    {
+      title: "Envíos China → Guinea",
+      desc: "Precio por kg · Malabo y Bata",
+      Icon: FlightTakeoffRoundedIcon,
+      route: "/envio-china",
+      grad: "linear-gradient(135deg,#7A1FA2 0%,#B24BD8 100%)",
+    },
   ];
   return (
     <Box sx={{ mt: 3 }}>
@@ -534,22 +553,7 @@ function ProductCard({ product, onOpen }) {
       }}
     >
       <CardActionArea onClick={onOpen} sx={{ p: 0.8, pb: 1.1 }}>
-        <Chip
-          label="Nuevo"
-          size="small"
-          sx={{
-            position: "absolute",
-            top: 8,
-            left: 8,
-            zIndex: 2,
-            height: 22,
-            borderRadius: "999px",
-            bgcolor: "#43C783",
-            color: "white",
-            fontWeight: 900,
-            fontSize: 10.5,
-          }}
-        />
+       
 
         <ProductImage src={product.image} alt={product.title} />
 
@@ -742,9 +746,9 @@ export default function HomePage() {
   );
 
   useEffect(() => {
-    loadAllSections();
+    // Portada: SOLO productos de Guinea Ecuatorial.
     loadLocalGQSection();
-  }, [loadAllSections, loadLocalGQSection]);
+  }, [loadLocalGQSection]);
 
   const mappedNewItems = useMemo(
     () => (newItems ?? []).map((p) => normalizeProduct(p, i18n.language)),
@@ -756,15 +760,15 @@ export default function HomePage() {
     [localGQItems, i18n.language]
   );
 
-  // Grupo del que salen los destacados (locales de Guinea o, si no hay, recientes).
-  const featuredPool = mappedLocalGQItems.length ? mappedLocalGQItems : mappedNewItems;
+  // SOLO productos de Guinea Ecuatorial (no caemos nunca a otros países).
+  const featuredPool = mappedLocalGQItems;
   // Muestra ALEATORIA de 6. Se recalcula al abrir la portada (shuffleKey) o al
   // llegar nuevos datos, pero NO en cada re-render (así no "salta" sola).
   const featuredItems = useMemo(
     () => pickRandom(featuredPool, 6),
     [featuredPool, shuffleKey]
   );
-  const featuredLoading = mappedLocalGQItems.length ? loadingLocalGQ : loadingLocalGQ || loadingAll;
+  const featuredLoading = loadingLocalGQ;
 
   const openProduct = useCallback((product) => {
     // Chekea: al tocar un producto se abre WhatsApp directamente.

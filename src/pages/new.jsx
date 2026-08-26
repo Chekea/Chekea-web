@@ -41,6 +41,8 @@ const DEFAULT_CATEGORY = "Creacion de Contenido";
 const CATEGORY_CHIPS = [
   { label: "Electronica", value: "Electronica" },
   { label: "Complementos para Peques", value: "Complementos para Peques" },
+    { label: "Hogar", value: "Hogar" },
+
   { label: "Creacion de Contenido", value: "Creacion de Contenido" },
 ];
 

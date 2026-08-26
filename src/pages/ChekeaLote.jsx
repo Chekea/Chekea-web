@@ -491,8 +491,9 @@ export default function CrearLoteChekea({ vendedorId }) {
   /* ---------- Render ---------- */
 
   return (
-    <Box sx={{ minHeight: "100vh", background: "#F6F7F9", p: 2 }}>
-      <Box
+
+    <>
+     <Box
         sx={{
           position: "sticky",
           top: 0,
@@ -512,6 +513,8 @@ export default function CrearLoteChekea({ vendedorId }) {
         </IconButton>
         <Typography sx={{ fontWeight: 900, fontSize: 18 }}>Reservar Espacio</Typography>
       </Box>
+       <Box sx={{ minHeight: "100vh", background: "#F6F7F9", p: 2 }}>
+     
       <Box maxWidth={480} mx="auto">
         <Stack direction="row" alignItems="center" justifyContent="space-between">
           {(shipment.nombre || shipment.cajas.length > 0) && !enviado && (
@@ -890,5 +893,7 @@ export default function CrearLoteChekea({ vendedorId }) {
         )}
       </Box>
     </Box>
+    </>
+   
   );
 }

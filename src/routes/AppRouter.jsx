@@ -22,6 +22,7 @@ const AccountPage = lazy(() => import("../pages/AccountPage"));
 const SearchResultsPage = lazy(() => import("../pages/ResultPage"));
 const EnviarPaquete = lazy(() => import("../pages/EnviarPaquete"));
 const Mudanza = lazy(() => import("../pages/Mudanza"));
+const EnvioChina = lazy(() => import("../pages/EnvioChina"));
 
 function AppFallback() {
   return <div style={{ padding: 16 }}>Cargando...</div>;
@@ -48,6 +49,7 @@ export default function AppRouter({ initialRNState }) {
             {/* Chekea Logistics: envío de paquetes y mudanzas (público) */}
             <Route path="/enviar" element={<EnviarPaquete />} />
             <Route path="/mudanza" element={<Mudanza />} />
+            <Route path="/envio-china" element={<EnvioChina />} />
 
             {/* Registro de mercancía (lote) — requiere sesión */}
             <Route
