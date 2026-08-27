@@ -29,7 +29,6 @@ import { openChekeaWhatsApp } from "../config/chekea";
 const RUTAS = [
   "Dentro de Malabo",
   "Malabo → Bata",
-  "China → GE",
 ];
 
 const TIPOS = [
@@ -137,10 +136,27 @@ export default function EnviarPaquete() {
       </Box>
 
       <Container maxWidth="sm" sx={{ px: { xs: 1.8, sm: 2.2 }, py: 2, pb: 5 }}>
-        <Typography sx={{ color: "#676B7D", fontSize: 14, mb: 2 }}>
+        <Typography sx={{ color: "#676B7D", fontSize: 14, mb: 1.5 }}>
           Completa tu pedido y te llevamos el paquete. Al final se abre WhatsApp
           con todo listo para confirmar.
         </Typography>
+        <Box
+          sx={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 0.6,
+            bgcolor: "#EEF9F2",
+            color: "#16845A",
+            fontWeight: 800,
+            fontSize: 13,
+            px: 1.4,
+            py: 0.9,
+            borderRadius: 2,
+            mb: 2.5,
+          }}
+        >
+          Envíos desde 500 FCFA · según la distancia
+        </Box>
 
         {/* Ruta */}
         <Typography sx={{ fontWeight: 900, fontSize: 15, mb: 1 }}>¿A dónde va?</Typography>

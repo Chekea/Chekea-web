@@ -44,8 +44,8 @@ export function buildProductMessage(product) {
 
   let msg = `Hola, me interesa este producto de Chekea: ${titulo}`;
   if (precio > 0) msg += ` (${new Intl.NumberFormat("es-ES").format(precio)} ${CHEKEA.currency})`;
-  if (codigo) msg += ` [ref ${codigo}]`;
-  if (lugar) msg += ` — ${lugar}`;
+  // if (codigo) msg += ` [ref ${codigo}]`;
+  // if (lugar) msg += ` — ${lugar}`;
   msg += ". ¿Sigue disponible?";
   return msg;
 }
