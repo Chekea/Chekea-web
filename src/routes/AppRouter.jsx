@@ -22,7 +22,7 @@ const AccountPage = lazy(() => import("../pages/AccountPage"));
 const SearchResultsPage = lazy(() => import("../pages/ResultPage"));
 const EnviarPaquete = lazy(() => import("../pages/EnviarPaquete"));
 const Mudanza = lazy(() => import("../pages/Mudanza"));
-const EnvioChina = lazy(() => import("../pages/EnvioChina"));
+const EnvioChina = lazy(() => import("../pages/Enviochina"));
 
 function AppFallback() {
   return <div style={{ padding: 16 }}>Cargando...</div>;
