@@ -24,53 +24,32 @@ export default function LoginPage() {
   const auth = useAuth();
   const nav = useNavigate();
 
-  const [mode, setMode] = useState("login"); // "login" | "register"
-
-  const [name, setName] = useState(""); // register
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [password2, setPassword2] = useState("");
-
   const [localErr, setLocalErr] = useState("");
   const [showPass, setShowPass] = useState(false);
-  const [showPass2, setShowPass2] = useState(false);
-
-  const validate = () => {
-    if (!email) return "El email es obligatorio.";
-    if (!password) return "La contraseña es obligatoria.";
-
-    if (mode === "register") {
-      if (!name) return "El nombre es obligatorio.";
-      if (!password2) return "Confirma tu contraseña.";
-      if (password !== password2) return "Las contraseñas no coinciden.";
-      if (password.length < 6) return "La contraseña debe tener al menos 6 caracteres.";
-    }
-    return "";
-  };
 
   const onSubmit = async () => {
     setLocalErr("");
     auth.clearError();
 
-    const v = validate();
-    if (v) {
-      setLocalErr(v);
+    if (!email) {
+      setLocalErr("El email es obligatorio.");
+      return;
+    }
+    if (!password) {
+      setLocalErr("La contraseña es obligatoria.");
       return;
     }
 
     try {
-      if (mode === "login") {
-        await auth.login({ email, password });
-      } else {
-        await auth.register({ name, email, password });
-      }
+      await auth.login({ email, password });
       nav("/account");
     } catch {
       // el error ya queda en auth.error
     }
   };
 
-  // ✅ NUEVO: Google
   const onGoogle = async () => {
     setLocalErr("");
     auth.clearError();
@@ -82,18 +61,7 @@ export default function LoginPage() {
     }
   };
 
-  const switchMode = () => {
-    setLocalErr("");
-    auth.clearError();
-    setPassword("");
-    setPassword2("");
-    setMode(mode === "login" ? "register" : "login");
-  };
-
-  const canSubmit =
-    !!email &&
-    !!password &&
-    (mode === "login" || (!!name && !!password2 && password === password2));
+  const canSubmit = !!email && !!password;
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
@@ -101,7 +69,7 @@ export default function LoginPage() {
       <Container maxWidth="sm" sx={{ py: 3 }}>
         <Paper elevation={0} sx={{ p: 3, borderRadius: 3 }}>
           <Typography variant="h5" sx={{ fontWeight: 900 }}>
-            {mode === "login" ? "Iniciar sesión" : "Crear cuenta"}
+            Iniciar sesión
           </Typography>
 
           {(localErr || auth.error) && (
@@ -111,7 +79,7 @@ export default function LoginPage() {
           )}
 
           <Stack spacing={2} sx={{ mt: 2 }}>
-            {/* ✅ NUEVO: Botón Google */}
+            {/* Google */}
             <Button
               variant="outlined"
               onClick={onGoogle}
@@ -122,15 +90,6 @@ export default function LoginPage() {
             </Button>
 
             <Divider>o</Divider>
-
-            {mode === "register" && (
-              <TextField
-                label="Nombre"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                autoComplete="name"
-              />
-            )}
 
             <TextField
               label="Email"
@@ -144,7 +103,7 @@ export default function LoginPage() {
               label="Contraseña"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
+              autoComplete="current-password"
               type={showPass ? "text" : "password"}
               InputProps={{
                 endAdornment: (
@@ -157,31 +116,8 @@ export default function LoginPage() {
               }}
             />
 
-            {mode === "register" && (
-              <TextField
-                label="Confirmar contraseña"
-                value={password2}
-                onChange={(e) => setPassword2(e.target.value)}
-                autoComplete="new-password"
-                type={showPass2 ? "text" : "password"}
-                InputProps={{
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <IconButton onClick={() => setShowPass2((v) => !v)} edge="end">
-                        {showPass2 ? <VisibilityOffIcon /> : <VisibilityIcon />}
-                      </IconButton>
-                    </InputAdornment>
-                  ),
-                }}
-              />
-            )}
-
             <Button variant="contained" onClick={onSubmit} disabled={!canSubmit || auth.loading}>
-              {auth.loading ? "Procesando..." : mode === "login" ? "Entrar" : "Registrarme"}
-            </Button>
-
-            <Button onClick={switchMode}>
-              {mode === "login" ? "Crear cuenta" : "Ya tengo cuenta"}
+              {auth.loading ? "Procesando..." : "Entrar"}
             </Button>
 
             <Button onClick={() => nav("/")}>Volver</Button>

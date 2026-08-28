@@ -18,6 +18,7 @@ import CrearLoteChekea from "../pages/ChekeaLote";
 const HomePage = lazy(() => import("../pages/Homepage"));
 const VerifyUploadPage = lazy(() => import("../pages/Verifyupload"));
 const LoginPage = lazy(() => import("../pages/LoginPage"));
+const RegistroVendedor = lazy(() => import("../pages/RegistroVendedor"));
 const AccountPage = lazy(() => import("../pages/AccountPage"));
 const SearchResultsPage = lazy(() => import("../pages/ResultPage"));
 const EnviarPaquete = lazy(() => import("../pages/EnviarPaquete"));
@@ -66,6 +67,7 @@ export default function AppRouter({ initialRNState }) {
 
             {/* Cuenta / sesión */}
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/registro" element={<RegistroVendedor />} />
             <Route path="/account" element={<AccountPage />} />
 
             {/* Cualquier otra ruta vuelve al escaparate */}
