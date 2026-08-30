@@ -431,16 +431,13 @@ export default function CrearLoteChekea({ vendedorId }) {
 
           await setDoc(productRef, {
             // --- Identidad del vendedor (para escribirle por WhatsApp) ---
-            vendedorId: sellerUid,
+            Vendedor: sellerUid,
             Whatsapp: normalizePhone(shipment.whatsapp),
 
             // --- Campos del ESCAPARATE (para que el producto APAREZCA) ---
             ...storefrontFields({
-              titulo: p.nombre.trim(),
-              precio: p.precio,
-              categoria: categoriaFinal,
-              ciudad: shipment.ciudad,
-              imagen: coverUrl,
+              Titulo: p.nombre.trim(),
+              Ciudad: shipment.ciudad,
             }),
             Fecha: serverTimestamp(),
 
@@ -448,7 +445,7 @@ export default function CrearLoteChekea({ vendedorId }) {
             envio: shipment.nombre.trim(),
             caja: caja.codigo.trim(),
             codigo,
-            nombre: p.nombre.trim(),
+            Nombre: p.nombre.trim(),
             categoria: categoriaFinal || null,
             cantidad: Number(p.cantidad) || 0,
             precio: toPrecio(p.precio),

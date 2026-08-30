@@ -14,7 +14,6 @@ import {
 } from "@mui/material";
 import GoogleIcon from "@mui/icons-material/Google";
 import { useNavigate } from "react-router-dom";
-import Header from "../components/header";
 import { useAuth } from "../state/AuthContext";
 
 import VisibilityIcon from "@mui/icons-material/Visibility";
@@ -65,7 +64,6 @@ export default function LoginPage() {
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
-      <Header queryText="" onQueryChange={() => {}} />
       <Container maxWidth="sm" sx={{ py: 3 }}>
         <Paper elevation={0} sx={{ p: 3, borderRadius: 3 }}>
           <Typography variant="h5" sx={{ fontWeight: 900 }}>
@@ -80,17 +78,7 @@ export default function LoginPage() {
 
           <Stack spacing={2} sx={{ mt: 2 }}>
             {/* Google */}
-            <Button
-              variant="outlined"
-              onClick={onGoogle}
-              disabled={auth.loading}
-              startIcon={<GoogleIcon />}
-            >
-              Continuar con Google
-            </Button>
-
-            <Divider>o</Divider>
-
+           
             <TextField
               label="Email"
               value={email}
