@@ -43,22 +43,13 @@ export default function LoginPage() {
 
     try {
       await auth.login({ email, password });
-      nav("/account");
+      nav("/lote");
     } catch {
       // el error ya queda en auth.error
     }
   };
 
-  const onGoogle = async () => {
-    setLocalErr("");
-    auth.clearError();
-    try {
-      await auth.loginWithGoogle();
-      nav("/account");
-    } catch {
-      // error ya queda en auth.error
-    }
-  };
+  
 
   const canSubmit = !!email && !!password;
 
