@@ -92,8 +92,8 @@ export function openProductWhatsApp(product) {
   // Registrar el contacto (en segundo plano, no bloquea la apertura).
   logContact({
     tipo: "producto",
-    vendedorId: product?.vendedorId ?? product?.sellerId ?? null,
-    productoId: product?.id ?? product?.docId ?? null,
+    vendedorId: product?.Vendedor ?? product?.sellerId ?? null,
+    productoId: product?.Codigo ?? product?.docId ?? null,
     titulo: product?.Titulo ?? product?.title ?? null,
     ciudad: product?.Ciudad ?? product?.ciudad ?? null,
   });
