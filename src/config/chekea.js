@@ -12,7 +12,7 @@
 // -----------------------------------------------------------------------------
 
 
-import { logContact } from "../services/contactlog";
+import { logContact } from "../services/Contactlog";
 export const CHEKEA = {
   // Número central de Chekea para wa.me. DEBE llevar el código de país SIN el "+".
   // Guinea Ecuatorial es 240 (ej.: 240222237169). Cámbialo por el número real.
