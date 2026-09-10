@@ -20,7 +20,7 @@ export default defineConfig({
       manifest: {
         name: "Chekea",
         short_name: "Chekea",
-        description: "El mercado más grande de Guinea Ecuatorial.",
+        description: "CRECEMOS JUNTOS ",
         theme_color: "#0A0A0A",
         background_color: "#0A0A0A",
         display: "standalone",
